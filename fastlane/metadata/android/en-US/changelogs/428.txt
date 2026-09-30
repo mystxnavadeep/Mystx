@@ -1,0 +1,2 @@
+- chore: Play Store compliance fixes (v2.0.37)
+- docs: add GEMINI.md to persist project-specific AI rules
