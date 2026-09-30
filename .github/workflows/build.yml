@@ -249,21 +249,41 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
-      - name: Build Release APK & AAB
+      - name: Build Release APK
         shell: bash
         run: |
           result=1
           for i in 1 2 3; do
-            ./gradlew assembleRelease bundleRelease --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
+            ./gradlew assembleRelease --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
               -PversionCode="$VERSION_CODE" \
               -PversionName="$VERSION_NAME" && { result=0; break; }
-            echo "::warning::Build attempt $i failed, retrying..."
+            echo "::warning::APK Build attempt $i failed, retrying..."
             sleep 15
           done
           exit $result
         env:
           # Passed via env rather than interpolated into the script: ${{ }} is substituted
           # before bash sees it, so a value containing shell metacharacters would be executed.
+          VERSION_CODE: ${{ needs.version.outputs.version_code }}
+          VERSION_NAME: ${{ needs.version.outputs.version_name }}
+          KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Build Play Store AAB
+        shell: bash
+        run: |
+          result=1
+          for i in 1 2 3; do
+            ./gradlew bundleRelease -PplayStore --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
+              -PversionCode="$VERSION_CODE" \
+              -PversionName="$VERSION_NAME" && { result=0; break; }
+            echo "::warning::AAB Build attempt $i failed, retrying..."
+            sleep 15
+          done
+          exit $result
+        env:
           VERSION_CODE: ${{ needs.version.outputs.version_code }}
           VERSION_NAME: ${{ needs.version.outputs.version_name }}
           KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
