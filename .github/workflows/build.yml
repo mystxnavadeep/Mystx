@@ -455,8 +455,8 @@ jobs:
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           files: |
-            artifacts/Mystx-*.apk
-            artifacts/Mystx-*.aab
+            artifacts/**/Mystx-*.apk
+            artifacts/**/Mystx-*.aab
             artifacts/versionCode.txt
           name: Mystx ${{ needs.version.outputs.tag }}
           body_path: /tmp/changelog.md
