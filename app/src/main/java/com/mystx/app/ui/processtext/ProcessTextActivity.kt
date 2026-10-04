@@ -113,6 +113,15 @@ class ProcessTextActivity : ComponentActivity() {
     private fun replaceAndFinish(original: String, replacement: String) {
         if (resultDelivered) return
         resultDelivered = true
+
+        if (intent?.getBooleanExtra("from_assistant", false) == true) {
+            val replaceIntent = Intent("com.mystx.app.ACTION_REPLACE_TEXT")
+            replaceIntent.putExtra("replacement", replacement)
+            sendBroadcast(replaceIntent)
+            finish()
+            return
+        }
+
         ProcessTextReplacementBridge.prepare(
             original = original,
             replacement = replacement,

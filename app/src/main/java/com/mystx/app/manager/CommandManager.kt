@@ -60,6 +60,7 @@ class CommandManager(context: Context) {
 
     // System commands — local operations that cannot be edited or deleted
     private val systemDefinitions = listOf(
+        "mystx" to "Show Mystx popup menu.",
         "undo" to "Undo the last replacement and restore the original text.",
         "copy" to "Copy the text to clipboard.",
         "cut" to "Cut the text to clipboard.",

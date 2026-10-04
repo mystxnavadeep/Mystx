@@ -120,9 +120,28 @@ class AssistantService : AccessibilityService() {
         val SPINNER_FRAMES = arrayOf("◐", "◓", "◑", "◒")
     }
 
+    private val replaceReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            if (intent.action == "com.mystx.app.ACTION_REPLACE_TEXT") {
+                val replacement = intent.getStringExtra("replacement") ?: return
+                serviceScope.launch {
+                    val source = findFocusedEditableSource() ?: return@launch
+                    replaceText(source, replacement, false)
+                    source.recycle()
+                }
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         try {
+            val filter = android.content.IntentFilter("com.mystx.app.ACTION_REPLACE_TEXT")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(replaceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(replaceReceiver, filter)
+            }
             keyManager = (applicationContext as MystxApp).keyManager
             commandManager = CommandManager(applicationContext)
             commandStudioStore = CommandStudioStore(applicationContext, commandManager)
@@ -268,6 +287,38 @@ class AssistantService : AccessibilityService() {
 
         val precedingText = text.substring(0, text.length - richCommand.trigger.length)
         val cleanText = precedingText.trim()
+
+        if (richCommand.trigger.endsWith("mystx") && richCommand.isBuiltIn) {
+            if (!isProcessing.compareAndSet(false, true)) {
+                source.safeRecycle()
+                return
+            }
+            startWatchdog()
+            cancelPendingProcessingReset()
+            currentJob?.cancel()
+            currentJob = serviceScope.launch {
+                val thisJob = coroutineContext[Job]
+                try {
+                    val replacerOk = replaceText(source, precedingText)
+                    if (replacerOk) {
+                        val intent = Intent(this@AssistantService, com.mystx.app.ui.menu.MystxMenuActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            putExtra(Intent.EXTRA_PROCESS_TEXT, precedingText)
+                        }
+                        startActivity(intent)
+                    }
+                } finally {
+                    withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Main) {
+                        if (currentJob === thisJob) {
+                            cancelWatchdog()
+                            scheduleProcessingReset()
+                        }
+                    }
+                    recycleIfUnowned(source)
+                }
+            }
+            return
+        }
 
         if (richCommand.trigger.endsWith("undo") && richCommand.isBuiltIn) {
             if (!isProcessing.compareAndSet(false, true)) {
@@ -1118,6 +1169,7 @@ class AssistantService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { unregisterReceiver(replaceReceiver) } catch (_: Exception) {}
         flushPendingClipRestore()
         isProcessing.set(false)
         lastReplacedText = null
