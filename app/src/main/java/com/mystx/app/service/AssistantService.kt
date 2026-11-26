@@ -377,7 +377,7 @@ class AssistantService : AccessibilityService() {
             val lastChar = text[text.length - 1]
             if (!triggerLastChars.contains(lastChar)) {
                 if (!lastChar.isLetterOrDigit() || !text.contains(cachedTranslatePrefix)) {
-                    updateAutocompleteForText(text)
+                    updateAutocompleteForText(text, source)
                     source.safeRecycle()
                     handedOff = true
                     return
@@ -385,7 +385,7 @@ class AssistantService : AccessibilityService() {
             }
 
             val command = commandManager.findCommand(text) ?: run {
-                updateAutocompleteForText(text)
+                updateAutocompleteForText(text, source)
                 source.safeRecycle()
                 handedOff = true
                 return
@@ -543,12 +543,14 @@ class AssistantService : AccessibilityService() {
         return token
     }
 
-    private fun updateAutocompleteForText(text: String) {
+    private fun updateAutocompleteForText(text: String, source: AccessibilityNodeInfo? = null) {
         if (!::commandManager.isInitialized || !::commandStudioStore.isInitialized) return
         val prefix = commandManager.getTriggerPrefix()
         val partialToken = extractPartialTriggerToken(text, prefix)
         if (partialToken == null) {
-            dismissAutocompleteOverlay()
+            if (autocompleteOverlayInitialized) {
+                handler.post { autocompleteOverlay.dismissAnimated() }
+            }
             return
         }
         val matches = commandStudioStore.getRichCommands()
@@ -558,15 +560,26 @@ class AssistantService : AccessibilityService() {
             .take(6)
             .toList()
         if (matches.isEmpty()) {
-            dismissAutocompleteOverlay()
+            if (autocompleteOverlayInitialized) {
+                handler.post { autocompleteOverlay.dismissAnimated() }
+            }
             return
+        }
+        val anchorTopPx = try {
+            source?.let { node ->
+                val rect = android.graphics.Rect()
+                node.getBoundsInScreen(rect)
+                rect.top.takeIf { it > 0 }
+            }
+        } catch (_: Exception) {
+            null
         }
         handler.post {
             if (isProcessing.get()) {
                 autocompleteOverlay.dismiss()
                 return@post
             }
-            autocompleteOverlay.show(matches) { selected ->
+            autocompleteOverlay.show(matches, anchorTopPx) { selected ->
                 onAutocompleteCommandSelected(selected, partialToken)
             }
         }

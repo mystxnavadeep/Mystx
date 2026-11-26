@@ -238,7 +238,7 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Blocked by Restricted Settings? Tap App Info -> Allow restricted settings.",
+                            text = "Blocked by Restricted Settings? Tap App Info → Allow restricted settings.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f).padding(end = 10.dp)
