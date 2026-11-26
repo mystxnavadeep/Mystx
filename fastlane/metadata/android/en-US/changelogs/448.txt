@@ -1,0 +1,2 @@
+- fix(settings): add missing MystUiStyle import
+- feat: add Firebase Auth, Firestore sync and 5 theme UI styles (v2.0.44)
