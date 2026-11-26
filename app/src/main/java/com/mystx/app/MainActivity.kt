@@ -3,6 +3,7 @@ package com.mystx.app
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -37,7 +38,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mystx.app.manager.AuthManager
 import com.mystx.app.model.PrefKeys
+import com.mystx.app.ui.AuthScreen
 import com.mystx.app.ui.DashboardScreen
 import com.mystx.app.ui.KeysScreen
 import com.mystx.app.ui.SettingsScreen
@@ -46,6 +49,7 @@ import com.mystx.app.ui.components.MystDock
 import com.mystx.app.ui.components.MystDockItem
 import com.mystx.app.ui.studio.CommandEditorScreen
 import com.mystx.app.ui.studio.CommandStudioScreen
+import com.mystx.app.ui.theme.MystUiStyle
 import com.mystx.app.ui.theme.MystxTheme
 
 enum class Tab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
@@ -75,7 +79,20 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MystxTheme {
+            val appPrefs = remember { getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+            var currentUiStyle by remember {
+                mutableStateOf(MystUiStyle.fromKey(appPrefs.getString(PrefKeys.APP_UI_STYLE, PrefKeys.DEFAULT_UI_STYLE)))
+            }
+            DisposableEffect(appPrefs) {
+                val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+                    if (key == PrefKeys.APP_UI_STYLE) {
+                        currentUiStyle = MystUiStyle.fromKey(sp.getString(PrefKeys.APP_UI_STYLE, PrefKeys.DEFAULT_UI_STYLE))
+                    }
+                }
+                appPrefs.registerOnSharedPreferenceChangeListener(listener)
+                onDispose { appPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+            }
+            MystxTheme(uiStyle = currentUiStyle) {
                 MystxMainScreen(
                     incomingPdfUri = incomingPdfUri,
                     onIncomingPdfConsumed = { incomingPdfUri = null }
@@ -98,6 +115,25 @@ fun MystxMainScreen(
     onIncomingPdfConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    var showAuthScreen by rememberSaveable {
+        mutableStateOf(
+            AuthManager.currentUser(context) == null &&
+                !vm.prefs.getBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false)
+        )
+    }
+    if (showAuthScreen && incomingPdfUri == null) {
+        AuthScreen(
+            onAuthSuccess = {
+                vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
+                showAuthScreen = false
+            },
+            onContinueAsGuest = {
+                vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, true).apply()
+                showAuthScreen = false
+            }
+        )
+        return
+    }
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
 
     var studioSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
@@ -239,7 +275,11 @@ fun MystxMainScreen(
                             commandStudioStore = vm.commandStudioStore,
                             prefs = vm.prefs,
                             keyManager = vm.keyManager,
-                            onNavigateToCommandStudio = { studioSubScreen = "studio_from_settings" }
+                            onNavigateToCommandStudio = { studioSubScreen = "studio_from_settings" },
+                            onOpenAuth = {
+                                vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
+                                showAuthScreen = true
+                            }
                         )
                     }
                 }

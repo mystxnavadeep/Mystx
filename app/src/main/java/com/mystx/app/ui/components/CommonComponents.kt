@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.mystx.app.R
+import com.mystx.app.ui.theme.LocalMystUiStyle
 import com.mystx.app.ui.theme.mystBrandGradient
 
 // ---------------------------------------------------------------------------
@@ -110,9 +111,10 @@ fun MystCard(
     fillHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val cardShape = RoundedCornerShape(LocalMystUiStyle.current.cardCornerDp.dp)
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MystCardShape,
+        shape = cardShape,
         color = MaterialTheme.colorScheme.surface,      // translucent glass fill
         tonalElevation = 0.dp,
         shadowElevation = 10.dp,

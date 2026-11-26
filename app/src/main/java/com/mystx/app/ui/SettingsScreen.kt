@@ -5,9 +5,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.mystx.app.BuildConfig
 import com.mystx.app.R
 import com.mystx.app.api.ApiClientUtils
+import com.mystx.app.manager.AuthManager
 import com.mystx.app.manager.CommandManager
 import com.mystx.app.manager.CommandStudioStore
 import com.mystx.app.manager.KeyManager
@@ -64,7 +67,8 @@ fun SettingsScreen(
     commandStudioStore: CommandStudioStore,
     prefs: SharedPreferences,
     keyManager: KeyManager,
-    onNavigateToCommandStudio: () -> Unit = {}
+    onNavigateToCommandStudio: () -> Unit = {},
+    onOpenAuth: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -251,6 +255,60 @@ fun SettingsScreen(
     ) {
         ScreenTitle(stringResource(R.string.settings_title))
 
+        // Account & Pro Status Card
+        var userAccount by remember { mutableStateOf(AuthManager.currentUser(context)) }
+        LaunchedEffect(userAccount?.uid) {
+            if (userAccount != null) {
+                AuthManager.fetchUserProfile(context).onSuccess { refreshed ->
+                    userAccount = refreshed
+                }
+            }
+        }
+        MystCard {
+            val acc = userAccount
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Text(
+                        text = acc?.displayName?.ifBlank { "Mystx User" } ?: "Guest Mode",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (acc != null) {
+                            val planLabel = if (acc.isProActive) "PRO (${acc.plan.uppercase()})" else "FREE PLAN"
+                            "${acc.email} · $planLabel"
+                        } else {
+                            "Sign in to sync your account & Pro status"
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (acc != null) {
+                    MystTonalButton(
+                        text = "Sign Out",
+                        onClick = {
+                            AuthManager.signOut(context)
+                            userAccount = null
+                        }
+                    )
+                } else {
+                    MystGradientButton(
+                        text = "Sign In",
+                        onClick = onOpenAuth
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Command Studio Entry Card
         MystCard(
             modifier = Modifier
@@ -291,6 +349,95 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Appearance / UI Style Switcher (5 Built-in Themes)
+        var selectedUiStyle by remember {
+            mutableStateOf(
+                MystUiStyle.fromKey(prefs.getString(PrefKeys.APP_UI_STYLE, PrefKeys.DEFAULT_UI_STYLE))
+            )
+        }
+        MystCard {
+            Text(
+                text = "App Theme & UI Style",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Choose your preferred look — updates live across the app.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MystUiStyle.entries.forEach { style ->
+                    val isSelected = selectedUiStyle == style
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
+                            .border(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                selectedUiStyle = style
+                                prefs.edit().putString(PrefKeys.APP_UI_STYLE, style.key).apply()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(style.previewBg)
+                                .border(2.dp, style.previewAccent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(style.previewAccent)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = style.label,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = style.subtitle,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (isSelected) {
+                            Text(
+                                text = "Active",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
             }
         }

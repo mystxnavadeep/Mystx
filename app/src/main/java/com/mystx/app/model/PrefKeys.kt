@@ -45,4 +45,11 @@ object PrefKeys {
 
     /** Default failover priority order across providers. */
     const val DEFAULT_FAILOVER_ORDER = "gemini,groq,custom"
+
+    /** Selected UI theme style (liquid_glass, linear_pro, nothing_os, material_you, warm_editorial). */
+    const val APP_UI_STYLE = "app_ui_style"
+    const val DEFAULT_UI_STYLE = "liquid_glass"
+
+    /** True when the user tapped "Continue as Guest" on the login screen. */
+    const val AUTH_SKIPPED_GUEST = "auth_skipped_guest"
 }
