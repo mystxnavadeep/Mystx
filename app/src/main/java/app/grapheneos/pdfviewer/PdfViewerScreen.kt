@@ -492,6 +492,7 @@ fun PdfViewerScreen(
                 var webViewInitFailed by remember { mutableStateOf(false) }
                 if (webViewInitFailed) {
                     WebViewAlertScreen(
+                        title = stringResource(R.string.webview_out_of_date_title),
                         message = stringResource(
                             R.string.webview_out_of_date_message,
                             webViewRelease, MIN_WEBVIEW_RELEASE
