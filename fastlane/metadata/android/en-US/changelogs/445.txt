@@ -1,0 +1,1 @@
+- feat(overlay): enhance autocomplete overlay with anchor positioning and smooth glass animations
