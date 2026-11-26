@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -231,14 +232,32 @@ private fun ProcessTextSheet(
                 null, is UiState.Initializing -> Unit
                 is UiState.CommandList -> CommandRows(s.commands) { viewModel.run(it) }
                 is UiState.Loading -> MystCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = s.command.trigger,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = s.command.trigger,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (s.streamingText.isNotBlank()) {
+                            val scrollState = rememberScrollState()
+                            LaunchedEffect(s.streamingText.length) {
+                                scrollState.animateScrollTo(scrollState.maxValue)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                text = s.streamingText,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 220.dp)
+                                    .verticalScroll(scrollState)
+                            )
+                        }
                     }
                 }
                 is UiState.Preview -> {

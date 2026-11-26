@@ -111,6 +111,11 @@ class AssistantService : AccessibilityService() {
         overlayToastInitialized = true
         OverlayToast(this@AssistantService, handler)
     }
+    private var autocompleteOverlayInitialized = false
+    private val autocompleteOverlay by lazy {
+        autocompleteOverlayInitialized = true
+        CommandAutocompleteOverlay(this@AssistantService, handler)
+    }
 
     /**
      * Stable identity for the field an undo point belongs to.
@@ -207,7 +212,7 @@ class AssistantService : AccessibilityService() {
             keyManager = (applicationContext as MystxApp).keyManager
             commandManager = CommandManager(applicationContext)
             commandStudioStore = CommandStudioStore(applicationContext, commandManager)
-            statsManager = StatsManager(applicationContext)
+            statsManager = (applicationContext as? MystxApp)?.statsManager ?: StatsManager(applicationContext)
             commandsPrefs = applicationContext.getSharedPreferences("commands", Context.MODE_PRIVATE).also {
                 it.registerOnSharedPreferenceChangeListener(prefChangeListener)
             }
@@ -295,7 +300,10 @@ class AssistantService : AccessibilityService() {
         if (event?.eventType != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) return
         val eventPkg = event.packageName?.toString()
         if (eventPkg == packageName) return
-        if (isSensitivePackage(eventPkg)) return
+        if (isSensitivePackage(eventPkg)) {
+            dismissAutocompleteOverlay()
+            return
+        }
         if (!::keyManager.isInitialized) return
 
         // Some hosts (WeChat-style editors, WebView fields) emit text-changed events whose
@@ -313,11 +321,13 @@ class AssistantService : AccessibilityService() {
         var handedOff = false
         try {
             if (isSensitivePackage(source.packageName?.toString())) {
+                dismissAutocompleteOverlay()
                 source.safeRecycle()
                 handedOff = true
                 return
             }
             if (source.isPassword) {
+                dismissAutocompleteOverlay()
                 source.safeRecycle()
                 handedOff = true
                 return
@@ -332,11 +342,13 @@ class AssistantService : AccessibilityService() {
                 return
             }
             if (isProcessing.get()) {
+                dismissAutocompleteOverlay()
                 source.safeRecycle()
                 handedOff = true
                 return
             }
             if (text.isEmpty()) {
+                dismissAutocompleteOverlay()
                 verifyRunnable?.let { handler.removeCallbacks(it) }
                 lastReplacedText = null
                 val prev = lastReplacedSource
@@ -365,6 +377,7 @@ class AssistantService : AccessibilityService() {
             val lastChar = text[text.length - 1]
             if (!triggerLastChars.contains(lastChar)) {
                 if (!lastChar.isLetterOrDigit() || !text.contains(cachedTranslatePrefix)) {
+                    updateAutocompleteForText(text)
                     source.safeRecycle()
                     handedOff = true
                     return
@@ -372,10 +385,13 @@ class AssistantService : AccessibilityService() {
             }
 
             val command = commandManager.findCommand(text) ?: run {
+                updateAutocompleteForText(text)
                 source.safeRecycle()
                 handedOff = true
                 return
             }
+
+            dismissAutocompleteOverlay()
 
             val richCommand = commandStudioStore.getRichForCommand(command)
             if (!richCommand.enabled) {
@@ -507,6 +523,117 @@ class AssistantService : AccessibilityService() {
      * an exception escapes before the finder takes ownership; double-recycle is benign
      * (`safeRecycle` catches `IllegalStateException`, and on API 33+ `recycle()` is a no-op).
      */
+    private fun dismissAutocompleteOverlay() {
+        if (autocompleteOverlayInitialized) {
+            handler.post { autocompleteOverlay.dismiss() }
+        }
+    }
+
+    private fun extractPartialTriggerToken(text: String, prefix: String): String? {
+        if (text.isEmpty() || prefix.isEmpty()) return null
+        if (text.last().isWhitespace()) return null
+        var tokenStart = text.length
+        while (tokenStart > 0 && !text[tokenStart - 1].isWhitespace()) {
+            tokenStart--
+        }
+        val token = text.substring(tokenStart)
+        if (!token.startsWith(prefix)) return null
+        val suffixLen = token.length - prefix.length
+        if (suffixLen !in 0..12) return null
+        return token
+    }
+
+    private fun updateAutocompleteForText(text: String) {
+        if (!::commandManager.isInitialized || !::commandStudioStore.isInitialized) return
+        val prefix = commandManager.getTriggerPrefix()
+        val partialToken = extractPartialTriggerToken(text, prefix)
+        if (partialToken == null) {
+            dismissAutocompleteOverlay()
+            return
+        }
+        val matches = commandStudioStore.getRichCommands()
+            .asSequence()
+            .filter { it.enabled && it.trigger.startsWith(partialToken, ignoreCase = true) }
+            .map { Command(it.trigger, it.promptTemplate, it.isBuiltIn, it.type) }
+            .take(6)
+            .toList()
+        if (matches.isEmpty()) {
+            dismissAutocompleteOverlay()
+            return
+        }
+        handler.post {
+            if (isProcessing.get()) {
+                autocompleteOverlay.dismiss()
+                return@post
+            }
+            autocompleteOverlay.show(matches) { selected ->
+                onAutocompleteCommandSelected(selected, partialToken)
+            }
+        }
+    }
+
+    private fun onAutocompleteCommandSelected(selected: Command, partialToken: String) {
+        if (isProcessing.get() || !::commandManager.isInitialized || !::commandStudioStore.isInitialized) return
+        val focused = findFocusedEditableSource() ?: return
+        var handedOff = false
+        try {
+            if (isSensitivePackage(focused.packageName?.toString()) || focused.isPassword) {
+                focused.safeRecycle()
+                handedOff = true
+                return
+            }
+            val currentText = focused.text?.toString() ?: ""
+            val precedingText = when {
+                currentText.endsWith(partialToken, ignoreCase = true) ->
+                    currentText.substring(0, currentText.length - partialToken.length)
+                else -> {
+                    val activePartial = extractPartialTriggerToken(currentText, commandManager.getTriggerPrefix())
+                    if (activePartial != null && currentText.endsWith(activePartial)) {
+                        currentText.substring(0, currentText.length - activePartial.length)
+                    } else {
+                        currentText
+                    }
+                }
+            }
+            val richCommand = commandStudioStore.getRichForCommand(selected)
+            val cleanText = precedingText.trim()
+            val canRunAiImmediately = richCommand.enabled &&
+                richCommand.type == CommandType.AI &&
+                (cleanText.isNotEmpty() || richCommand.trigger.endsWith("reply") || richCommand.promptTemplate.contains("{screen_text}"))
+
+            if (canRunAiImmediately) {
+                if (!isProcessing.compareAndSet(false, true)) {
+                    focused.safeRecycle()
+                    handedOff = true
+                    return
+                }
+                startWatchdog()
+                cancelPendingProcessingReset()
+                currentJob?.cancel()
+                handedOff = true
+                processCommand(focused, cleanText, richCommand)
+            } else {
+                handedOff = true
+                val updatedText = precedingText + selected.trigger
+                serviceScope.launch {
+                    try {
+                        replaceText(focused, updatedText)
+                    } catch (_: Exception) {
+                    } finally {
+                        withContext(NonCancellable + Dispatchers.Main) {
+                            recycleIfUnowned(focused)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (!handedOff) {
+                recycleIfUnowned(focused)
+            }
+            Log.w(TAG, "autocomplete selection failed", e)
+        }
+    }
+
     private fun findFocusedEditableSource(): AccessibilityNodeInfo? {
         val root = try {
             rootInActiveWindow
@@ -1241,8 +1368,9 @@ class AssistantService : AccessibilityService() {
         handler.post {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                    val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager ?: return@post
                     val vibrator = vibratorManager.defaultVibrator
+                    if (!vibrator.hasVibrator()) return@post
                     when (feedbackType) {
                         HapticFeedbackConstants.CONFIRM ->
                             vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
@@ -1251,17 +1379,24 @@ class AssistantService : AccessibilityService() {
                     }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     @Suppress("DEPRECATION")
-                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return@post
+                    if (!vibrator.hasVibrator()) return@post
                     when (feedbackType) {
                         HapticFeedbackConstants.CONFIRM ->
                             vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
                         HapticFeedbackConstants.REJECT ->
                             vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
                     }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    @Suppress("DEPRECATION")
+                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return@post
+                    if (!vibrator.hasVibrator()) return@post
+                    vibrator.vibrate(VibrationEffect.createOneShot(40L, VibrationEffect.DEFAULT_AMPLITUDE))
                 } else {
                     @Suppress("DEPRECATION")
-                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-                    vibrator.vibrate(50)
+                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return@post
+                    if (!vibrator.hasVibrator()) return@post
+                    vibrator.vibrate(40L)
                 }
             } catch (_: Exception) {}
         }
@@ -1279,6 +1414,9 @@ class AssistantService : AccessibilityService() {
         lastReplacedSource = null
         if (overlayToastInitialized) {
             overlayToast.dismiss()
+        }
+        if (autocompleteOverlayInitialized) {
+            autocompleteOverlay.dismiss()
         }
     }
 
@@ -1299,6 +1437,9 @@ class AssistantService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         if (overlayToastInitialized) {
             overlayToast.dismiss()
+        }
+        if (autocompleteOverlayInitialized) {
+            autocompleteOverlay.dismiss()
         }
         serviceScope.cancel()
     }

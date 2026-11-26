@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.icu.text.DecimalFormatSymbols
 import android.icu.text.NumberFormat
@@ -219,8 +220,21 @@ private val WASM_PATHS = setOf(
     "/viewer/wasm/quickjs-eval.wasm"
 )
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 private fun getWebViewRelease(): Int {
-    val versionName = WebView.getCurrentWebViewPackage()?.versionName ?: return 0
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        return MIN_WEBVIEW_RELEASE
+    }
+    val versionName = try {
+        WebView.getCurrentWebViewPackage()?.versionName
+    } catch (_: Throwable) {
+        null
+    } ?: return 0
     return versionName.substringBefore(".").toIntOrNull() ?: 0
 }
 
@@ -236,7 +250,7 @@ fun PdfViewerScreen(
     onClose: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val activity = context as Activity
+    val activity = context.findActivity()
     val view = LocalView.current
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -299,12 +313,15 @@ fun PdfViewerScreen(
     }
 
     SideEffect {
-        WindowCompat.getInsetsController(activity.window, view)
-            .isAppearanceLightStatusBars = false
+        activity?.window?.let { win ->
+            WindowCompat.getInsetsController(win, view)
+                .isAppearanceLightStatusBars = false
+        }
     }
 
     LaunchedEffect(isToolbarVisible) {
-        val controller = WindowCompat.getInsetsController(activity.window, view)
+        val win = activity?.window ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(win, view)
         if (isToolbarVisible) {
             controller.show(WindowInsetsCompat.Type.statusBars())
         } else {
@@ -471,8 +488,20 @@ fun PdfViewerScreen(
                 modifier = Modifier.testTag(TestTags.WEBVIEW_ALERT)
             )
             else -> {
-                AndroidView(
+                var webViewInitFailed by remember { mutableStateOf(false) }
+                if (webViewInitFailed) {
+                    WebViewAlert(
+                        message = stringResource(
+                            R.string.webview_out_of_date_message,
+                            webViewRelease, MIN_WEBVIEW_RELEASE
+                        ),
+                        showReload = true,
+                        onReload = { webViewInitFailed = false },
+                        modifier = Modifier.testTag(TestTags.WEBVIEW_ALERT)
+                    )
+                } else AndroidView(
                     factory = { ctx ->
+                        try {
                         WebView(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -495,11 +524,17 @@ fun PdfViewerScreen(
                             webView = it
                             onWebViewCreated(it)
                         }
+                        } catch (_: Throwable) {
+                            webViewInitFailed = true
+                            android.view.View(ctx)
+                        }
                     },
-                    onRelease = { releasingWebView ->
+                    onRelease = { releasingView ->
                         webView = null
                         onWebViewDestroyed()
-                        purgeWebView(releasingWebView)
+                        if (releasingView is WebView) {
+                            purgeWebView(releasingView)
+                        }
                     },
                     modifier = Modifier
                         .fillMaxSize()

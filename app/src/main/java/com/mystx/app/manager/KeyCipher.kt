@@ -58,26 +58,29 @@ internal class AndroidKeystoreCipher : KeyCipher {
             keyStore.load(null)
             if (!keyStore.containsAlias(KEY_ALIAS)) {
                 val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-                keyGenerator.init(
-                    KeyGenParameterSpec.Builder(
-                        KEY_ALIAS,
-                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                    )
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setKeySize(256)
-                        .apply {
-                            // Keys are only ever needed while the user is actively typing, so
-                            // requiring an unlocked device costs nothing and stops the stored
-                            // API keys from being decryptable on a locked device. Applies to
-                            // newly generated keys only; existing installs keep theirs.
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                                setUnlockedDeviceRequired(true)
-                            }
-                        }
-                        .build()
+                fun buildSpec(requireUnlocked: Boolean) = KeyGenParameterSpec.Builder(
+                    KEY_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
                 )
-                keyGenerator.generateKey()
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .apply {
+                        if (requireUnlocked && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                            setUnlockedDeviceRequired(true)
+                        }
+                    }
+                    .build()
+                try {
+                    keyGenerator.init(buildSpec(requireUnlocked = true))
+                    keyGenerator.generateKey()
+                } catch (e: Exception) {
+                    // Fallback for OEM Keymaster HALs (MIUI, ColorOS, Realme UI, older Knox)
+                    // that reject setUnlockedDeviceRequired(true).
+                    android.util.Log.w("KeyCipher", "Retrying keygen without unlocked-device requirement", e)
+                    keyGenerator.init(buildSpec(requireUnlocked = false))
+                    keyGenerator.generateKey()
+                }
             }
         } catch (e: Exception) {
             android.util.Log.e("KeyCipher", "Keystore init failed", e)

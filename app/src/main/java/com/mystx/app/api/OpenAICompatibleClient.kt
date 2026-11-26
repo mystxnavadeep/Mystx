@@ -5,9 +5,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -19,6 +22,7 @@ class OpenAICompatibleClient {
     companion object {
         private val HTTP_PREFIX_REGEX = Regex("^HTTP_\\d+:\\s*")
         private val CLOUD_KEY_PREFIXES = listOf("sk-", "gsk_", "AIza", "xai-", "sk-ant-")
+        private const val MAX_STREAM_BYTES = 512 * 1024
     }
 
     private fun sanitizeKeyForEndpoint(apiKey: String?, endpoint: String): Result<String> {
@@ -274,6 +278,253 @@ class OpenAICompatibleClient {
         cleaned.map { GenerateResult(it, meta?.structuredOutputFailed == true, meta?.truncated == true) }
     }
 
+    suspend fun generateTextStream(
+        endpoint: String,
+        apiKey: String,
+        model: String,
+        prompt: String,
+        text: String,
+        temperature: Float = 0.7f,
+        maxOutputTokens: Int = 2048,
+        onChunk: (String) -> Unit
+    ): Result<ApiResult> = withContext(Dispatchers.IO) {
+        if (EndpointValidator.validate(endpoint) != EndpointValidator.Error.NONE) {
+            return@withContext Result.failure(Exception("Endpoint must be https:// or an http:// private-LAN address"))
+        }
+        val cleanKey = sanitizeKeyForEndpoint(apiKey, endpoint).getOrElse {
+            return@withContext Result.failure(it)
+        }
+        var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
+        try {
+            val baseUrl = endpoint.trimEnd('/')
+            connection = URL("$baseUrl/chat/completions")
+                .openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "text/event-stream")
+            if (cleanKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+            }
+            connection.doOutput = true
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 60_000
+
+            val boundaryTag = ApiClientUtils.generateBoundaryTag()
+            val systemContent = ApiClientUtils.buildSystemPromptPrefix(boundaryTag) + prompt
+
+            val jsonBody = JSONObject().apply {
+                val safeModel = model.replace(Regex("[^a-zA-Z0-9._\\-/: ]"), "")
+                put("model", safeModel)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemContent)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", ApiClientUtils.wrapUserTextWithTag(text, boundaryTag))
+                    })
+                })
+                put("temperature", temperature.toDouble())
+                put("max_tokens", maxOutputTokens)
+                put("stream", true)
+            }
+
+            connection.outputStream.use { os ->
+                os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
+                val fullText = StringBuilder()
+                val rawBuffer = StringBuilder()
+                var sawDataLine = false
+                var truncated = false
+                var totalBytes = 0
+
+                connection.inputStream.use { stream ->
+                    BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            currentCoroutineContext().ensureActive()
+                            val currentLine = line ?: continue
+                            totalBytes += currentLine.toByteArray(Charsets.UTF_8).size + 1
+                            if (totalBytes > MAX_STREAM_BYTES) {
+                                truncated = true
+                                break
+                            }
+                            val trimmed = currentLine.trim()
+                            if (trimmed.startsWith("data:")) {
+                                sawDataLine = true
+                                val payload = trimmed.removePrefix("data:").trim()
+                                if (payload == "[DONE]") break
+                                if (payload.isEmpty()) continue
+
+                                val chunkJson = try {
+                                    JSONObject(payload)
+                                } catch (_: Exception) {
+                                    continue
+                                }
+                                val choices = chunkJson.optJSONArray("choices")
+                                val choice = choices?.optJSONObject(0) ?: continue
+                                val finishReason = choice.optStringOrNull("finish_reason") ?: ""
+                                if (finishReason == "content_filter") {
+                                    return@withContext Result.failure(Exception("Response blocked by content filter"))
+                                }
+                                if (finishReason == "length") {
+                                    truncated = true
+                                }
+                                val delta = choice.optJSONObject("delta")?.optStringOrNull("content")
+                                if (!delta.isNullOrEmpty()) {
+                                    fullText.append(delta)
+                                    onChunk(delta)
+                                }
+                            } else if (!sawDataLine) {
+                                rawBuffer.append(currentLine).append('\n')
+                            }
+                        }
+                    }
+                }
+
+                // Fallback for servers that ignore stream=true and return plain JSON.
+                if (!sawDataLine) {
+                    val rawBody = rawBuffer.toString().trim()
+                    if (rawBody.isNotEmpty()) {
+                        val jsonResponse = JSONObject(rawBody)
+                        val choices = jsonResponse.optJSONArray("choices")
+                        if (choices != null && choices.length() > 0) {
+                            val choice = choices.optJSONObject(0)
+                                ?: return@withContext Result.failure(Exception("No choices found in response"))
+                            val finishReason = choice.optStringOrNull("finish_reason") ?: ""
+                            if (finishReason == "content_filter") {
+                                return@withContext Result.failure(Exception("Response blocked by content filter"))
+                            }
+                            if (finishReason == "length") {
+                                truncated = true
+                            }
+                            val message = choice.optJSONObject("message")
+                            val refusal = message?.optStringOrNull("refusal")
+                            if (!refusal.isNullOrBlank()) {
+                                return@withContext Result.failure(Exception("Response refused by model"))
+                            }
+                            val content = message?.optStringOrNull("content") ?: ""
+                            if (content.isNotEmpty()) {
+                                fullText.append(content)
+                                onChunk(content)
+                            }
+                        } else {
+                            return@withContext Result.failure(Exception("No choices found in response"))
+                        }
+                    }
+                }
+
+                val resultText = fullText.toString().trim()
+                if (resultText.isBlank()) {
+                    Result.failure(Exception("Model returned empty response"))
+                } else {
+                    Result.success(ApiResult(text = resultText, truncated = truncated))
+                }
+            } else {
+                mapHttpError(connection, responseCode, baseUrl, cleanKey)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            mapException(e, cleanKey)
+        } finally {
+            completionHandle?.dispose()
+            connection?.disconnect()
+        }
+    }
+
+    private suspend fun mapHttpError(
+        connection: HttpURLConnection,
+        responseCode: Int,
+        baseUrl: String,
+        cleanKey: String
+    ): Result<ApiResult> = when (responseCode) {
+        413 -> {
+            val errorBody = ApiClientUtils.readErrorBody(connection)
+            val apiMessage = ApiClientUtils.redactSecrets(
+                ApiClientUtils.extractApiErrorMessage(errorBody),
+                cleanKey
+            )
+            val detail = if (apiMessage.isNotEmpty()) apiMessage else "Request too large"
+            Result.failure(ApiException(ApiError.RequestTooLarge(detail), detail))
+        }
+        429 -> {
+            val retryAfter = connection.getHeaderField("Retry-After")
+            val seconds = ApiClientUtils.parseRetryAfterSeconds(retryAfter)
+                ?.coerceIn(0L, Int.MAX_VALUE.toLong())
+                ?.toInt()
+            val msg = if (seconds != null) "Rate limit exceeded, retry after ${seconds}s" else "Rate limit exceeded"
+            Result.failure(ApiException(ApiError.RateLimit(msg, seconds), msg))
+        }
+        400, 422 -> {
+            val errorBody = ApiClientUtils.readErrorBody(connection)
+            val apiMessage = ApiClientUtils.redactSecrets(
+                ApiClientUtils.extractApiErrorMessage(errorBody),
+                cleanKey
+            )
+            val detail = if (apiMessage.isNotEmpty()) apiMessage else "Bad request"
+            val providerCode = ApiClientUtils.extractApiErrorCode(errorBody)
+            val withCode = if (providerCode.isNotEmpty()) "$detail [$providerCode]" else detail
+            Result.failure(ApiException(ApiError.Other(withCode), withCode))
+        }
+        401, 403 -> {
+            val errorBody = ApiClientUtils.readErrorBody(connection)
+            val apiMessage = ApiClientUtils.redactSecrets(
+                ApiClientUtils.extractApiErrorMessage(errorBody),
+                cleanKey
+            )
+            val signinUrl = ApiClientUtils.extractSigninUrl(errorBody)
+            val detail = when {
+                signinUrl != null || apiMessage.contains("not currently signed in", ignoreCase = true) ->
+                    "${ApiClientUtils.SIGNIN_REQUIRED_MARKER}: ${apiMessage.ifEmpty { "server sign-in required" }}"
+                apiMessage.isNotEmpty() -> apiMessage
+                else -> "Invalid API key"
+            }
+            Result.failure(ApiException(ApiError.InvalidKey(detail), detail))
+        }
+        else -> {
+            val errorBody = ApiClientUtils.readErrorBody(connection)
+            if (responseCode == 404 && !baseUrl.endsWith("/v1")) {
+                connection.disconnect()
+                if (probeModels("$baseUrl/v1/models", cleanKey)) {
+                    return Result.failure(
+                        ApiException(ApiError.Other(ApiClientUtils.NEEDS_V1_MARKER), ApiClientUtils.NEEDS_V1_MARKER)
+                    )
+                }
+            }
+            var detail = ApiClientUtils.redactSecrets(
+                ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)"),
+                cleanKey
+            )
+            val providerCode = ApiClientUtils.extractApiErrorCode(errorBody)
+            if (responseCode == 404 || providerCode == "model_not_found") {
+                detail = "Model not found. $detail"
+            }
+            val apiError = if (responseCode in 500..599) ApiError.ServerError(detail) else ApiError.Other(detail)
+            Result.failure(ApiException(apiError, detail))
+        }
+    }
+
+    private fun mapException(e: Exception, cleanKey: String): Result<ApiResult> {
+        val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unknown error", cleanKey)
+        val apiError = when (e) {
+            is ApiException -> e.apiError
+            is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException ->
+                ApiError.Network(ApiClientUtils.redactSecrets(e.message ?: "Network error", cleanKey))
+            is org.json.JSONException -> ApiError.Other("Invalid response from server")
+            else -> ApiError.Other(safeMsg)
+        }
+        return if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, safeMsg))
+    }
+
     private fun stripHttpPrefix(result: Result<String>): Result<String> {
         if (result.isFailure) {
             val msg = result.exceptionOrNull()?.message ?: ""
@@ -404,21 +655,6 @@ class OpenAICompatibleClient {
                 } else {
                     Result.failure(Exception("No choices found in response"))
                 }
-            } else if (responseCode == 413) {
-                val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.redactSecrets(
-                    ApiClientUtils.extractApiErrorMessage(errorBody),
-                    cleanKey
-                )
-                val detail = if (apiMessage.isNotEmpty()) apiMessage else "Request too large"
-                Result.failure(ApiException(ApiError.RequestTooLarge(detail), detail))
-            } else if (responseCode == 429) {
-                val retryAfter = connection.getHeaderField("Retry-After")
-                val seconds = ApiClientUtils.parseRetryAfterSeconds(retryAfter)
-                    ?.coerceIn(0L, Int.MAX_VALUE.toLong())
-                    ?.toInt()
-                val msg = if (seconds != null) "Rate limit exceeded, retry after ${seconds}s" else "Rate limit exceeded"
-                Result.failure(ApiException(ApiError.RateLimit(msg, seconds), msg))
             } else if (responseCode == 400 || responseCode == 422) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
                 val apiMessage = ApiClientUtils.redactSecrets(
@@ -434,58 +670,13 @@ class OpenAICompatibleClient {
                 val providerCode = ApiClientUtils.extractApiErrorCode(errorBody)
                 val withCode = if (providerCode.isNotEmpty()) "$detail [$providerCode]" else detail
                 Result.failure(Exception("HTTP_${responseCode}: $withCode"))
-            } else if (responseCode == 401 || responseCode == 403) {
-                val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.redactSecrets(
-                    ApiClientUtils.extractApiErrorMessage(errorBody),
-                    cleanKey
-                )
-                val signinUrl = ApiClientUtils.extractSigninUrl(errorBody)
-                val detail = when {
-                    signinUrl != null || apiMessage.contains("not currently signed in", ignoreCase = true) ->
-                        "${ApiClientUtils.SIGNIN_REQUIRED_MARKER}: ${apiMessage.ifEmpty { "server sign-in required" }}"
-                    apiMessage.isNotEmpty() -> apiMessage
-                    else -> "Invalid API key"
-                }
-                Result.failure(ApiException(ApiError.InvalidKey(detail), detail))
             } else {
-                val errorBody = ApiClientUtils.readErrorBody(connection)
-                if (responseCode == 404 && !baseUrl.endsWith("/v1")) {
-                    connection?.disconnect()
-                    connection = null
-                    if (probeModels("$baseUrl/v1/models", cleanKey)) {
-                        return Result.failure(
-                            ApiException(ApiError.Other(ApiClientUtils.NEEDS_V1_MARKER), ApiClientUtils.NEEDS_V1_MARKER)
-                        )
-                    }
-                }
-                var detail = ApiClientUtils.redactSecrets(
-                    ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)"),
-                    cleanKey
-                )
-                // Groq reports an unknown or inaccessible model as HTTP 404 with the reason only
-                // in error.code ("model_not_found"); its message ("The model `x` does not exist or
-                // you do not have access to it.") matches none of the localized patterns, so the
-                // user was shown raw English. Normalize onto the existing translated string.
-                val providerCode = ApiClientUtils.extractApiErrorCode(errorBody)
-                if (responseCode == 404 || providerCode == "model_not_found") {
-                    detail = "Model not found. $detail"
-                }
-                val apiError = if (responseCode in 500..599) ApiError.ServerError(detail) else ApiError.Other(detail)
-                Result.failure(ApiException(apiError, detail))
+                mapHttpError(connection, responseCode, baseUrl, cleanKey)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unknown error", cleanKey)
-            val apiError = when (e) {
-                is ApiException -> e.apiError
-                is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException ->
-                    ApiError.Network(ApiClientUtils.redactSecrets(e.message ?: "Network error", cleanKey))
-                is org.json.JSONException -> ApiError.Other("Invalid response from server")
-                else -> ApiError.Other(safeMsg)
-            }
-            if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, safeMsg))
+            mapException(e, cleanKey)
         } finally {
             completionHandle?.dispose()
             connection?.disconnect()

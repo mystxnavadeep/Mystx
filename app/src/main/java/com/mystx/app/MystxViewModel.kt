@@ -15,7 +15,7 @@ class MystxViewModel(application: Application) : AndroidViewModel(application) {
     val keyManager = (application as MystxApp).keyManager
     val commandManager = CommandManager(application)
     val commandStudioStore = CommandStudioStore(application, commandManager)
-    val statsManager = StatsManager(application)
+    val statsManager = (application as? MystxApp)?.statsManager ?: StatsManager(application)
     val geminiClient = GeminiClient()
     val openAIClient = OpenAICompatibleClient()
 }

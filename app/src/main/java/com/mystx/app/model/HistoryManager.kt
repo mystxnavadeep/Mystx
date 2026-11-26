@@ -96,6 +96,7 @@ object HistoryManager {
     @Synchronized
     fun addEntry(context: Context, originalText: String, commandTrigger: String, response: String, isSelection: Boolean) {
         loadHistory(context)
+        if (!isLoaded) return
         val newItem = HistoryItem(originalText, commandTrigger, response, System.currentTimeMillis(), isSelection)
         // Remove exact duplicate if exists
         cachedHistory.removeAll { it.originalText == originalText && it.commandTrigger == commandTrigger && it.isSelection == isSelection }

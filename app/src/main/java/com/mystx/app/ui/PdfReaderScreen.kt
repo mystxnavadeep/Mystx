@@ -106,9 +106,9 @@ fun PdfReaderScreen(
             enter = fadeIn() + slideInHorizontally(),
             exit = fadeOut() + slideOutHorizontally()
         ) {
-            if (selectedText != null) {
+            selectedText?.let { currentSelection ->
                 DraggableExplainPopup(
-                    selectedText = selectedText!!,
+                    selectedText = currentSelection,
                     onClose = {
                         isPopupVisible = false
                         selectedText = null

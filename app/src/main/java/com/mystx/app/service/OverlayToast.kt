@@ -40,7 +40,7 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
         try {
             view.visibility = View.GONE
             if (view.isAttachedToWindow) {
-                val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
                 wm.removeViewImmediate(view)
             }
         } catch (_: Exception) {}
@@ -49,7 +49,7 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
     /** Show [msg], replacing any currently-visible overlay toast. */
     fun show(msg: String) {
         dismiss()
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
 
         val textView = TextView(context).apply {
             text = msg
@@ -101,7 +101,7 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
             dismissRunnable = runnable
             handler.postDelayed(runnable, TOAST_DURATION_MS)
         } catch (_: Exception) {
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            try { Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
         }
     }
 

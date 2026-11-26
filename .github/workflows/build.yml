@@ -463,7 +463,7 @@ jobs:
           name: Mystx ${{ needs.version.outputs.tag }}
           body_path: /tmp/changelog.md
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(needs.version.outputs.tag, 'beta') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

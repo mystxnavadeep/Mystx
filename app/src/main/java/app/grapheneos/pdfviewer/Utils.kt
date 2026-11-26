@@ -2,10 +2,11 @@ package app.grapheneos.pdfviewer
 
 import java.text.DateFormat
 import java.text.ParseException
-import java.time.DateTimeException
-import java.time.LocalDateTime
-import java.time.ZoneOffset
+import java.util.Calendar
 import java.util.Date
+import java.util.GregorianCalendar
+import java.util.Locale
+import java.util.TimeZone
 
 // PDF date string format, per section 7.9.4 of PDF 32000-2:2020:
 //
@@ -45,9 +46,9 @@ private fun parseGroup(matchResult: MatchResult, group: Int, defaultValue: Int):
     return parseIntSafely(field)
 }
 
-// Resolve the universal time relation into a UTC offset. A missing relation or
+// Resolve the universal time relation into a TimeZone. A missing relation or
 // "Z" means UTC; offsets are capped to the real-world UTC-12:00 to UTC+14:00 range.
-private fun parseOffset(matchResult: MatchResult): ZoneOffset {
+private fun parseTimeZone(matchResult: MatchResult): TimeZone {
     val utRel = matchResult.groups[7]?.value
     val offsetHours = parseGroup(matchResult, 8, 0)
     val offsetMinutes = parseGroup(matchResult, 9, 0)
@@ -56,7 +57,7 @@ private fun parseOffset(matchResult: MatchResult): ZoneOffset {
         if (offsetHours != 0 || offsetMinutes != 0) {
             throw ParseException("UTC indicator 'Z' must not have a non-zero offset", 0)
         }
-        return ZoneOffset.UTC
+        return TimeZone.getTimeZone("UTC")
     }
     if (offsetMinutes > 59) {
         throw ParseException("Invalid UTC offset minutes", 0)
@@ -66,15 +67,17 @@ private fun parseOffset(matchResult: MatchResult): ZoneOffset {
         if (magnitude > 1200) {
             throw ParseException("Invalid UTC offset", 0)
         }
-        return ZoneOffset.ofHoursMinutes(-offsetHours, -offsetMinutes)
+        val id = String.format(Locale.US, "GMT-%02d:%02d", offsetHours, offsetMinutes)
+        return TimeZone.getTimeZone(id)
     }
     if (magnitude > 1400) {
         throw ParseException("Invalid UTC offset", 0)
     }
-    return ZoneOffset.ofHoursMinutes(offsetHours, offsetMinutes)
+    val id = String.format(Locale.US, "GMT+%02d:%02d", offsetHours, offsetMinutes)
+    return TimeZone.getTimeZone(id)
 }
 
-// Parse date as per PDF spec (complies with PDF v1.4 to v2.0)
+// Parse date as per PDF spec (complies with PDF v1.4 to v2.0), API 23+ compatible.
 @Throws(ParseException::class)
 fun parseDate(date: String): String {
     // D: prefix is optional for PDF < v1.7; required for PDF v1.7+
@@ -83,21 +86,32 @@ fun parseDate(date: String): String {
     val matchResult = PDF_DATE_PATTERN.matchEntire(input)
         ?: throw ParseException("Invalid date format", 0)
 
-    // java.time months are 1-based; an absent month or day defaults to 1, the
-    // time fields to 0.
-    val year = parseIntSafely(matchResult.groups[1]!!.value)
+    val year = parseIntSafely(matchResult.groups[1]?.value ?: throw ParseException("Missing year", 0))
     val month = parseGroup(matchResult, 2, 1)
     val day = parseGroup(matchResult, 3, 1)
     val hours = parseGroup(matchResult, 4, 0)
     val minutes = parseGroup(matchResult, 5, 0)
     val seconds = parseGroup(matchResult, 6, 0)
-    val offset = parseOffset(matchResult)
+    val timeZone = parseTimeZone(matchResult)
 
-    // LocalDateTime.of validates the fields and rejects impossible dates such
-    // as February 31; the offset then resolves it to a definite instant.
+    if (month !in 1..12 || day !in 1..31 || hours !in 0..23 || minutes !in 0..59 || seconds !in 0..59) {
+        throw ParseException("Invalid date field", 0)
+    }
+
     val instant: Date = try {
-        Date.from(LocalDateTime.of(year, month, day, hours, minutes, seconds).toInstant(offset))
-    } catch (_: DateTimeException) {
+        val cal = GregorianCalendar(timeZone, Locale.US).apply {
+            isLenient = false
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month - 1)
+            set(Calendar.DAY_OF_MONTH, day)
+            set(Calendar.HOUR_OF_DAY, hours)
+            set(Calendar.MINUTE, minutes)
+            set(Calendar.SECOND, seconds)
+            set(Calendar.MILLISECOND, 0)
+        }
+        cal.time
+    } catch (_: IllegalArgumentException) {
         throw ParseException("Invalid date", 0)
     }
 

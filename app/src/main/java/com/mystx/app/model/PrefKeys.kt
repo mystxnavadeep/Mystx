@@ -33,7 +33,16 @@ object PrefKeys {
 
     /** Epoch millis when structured output was last disabled (0 = never). */
     const val STRUCTURED_OUTPUT_DISABLED_AT = "structured_output_disabled_at"
+
     /** Language to use for Quick Explain popup responses. */
     const val EXPLAIN_LANGUAGE = "explain_language"
 
+    /** Whether cross-provider failover is enabled. */
+    const val FAILOVER_ENABLED = "failover_enabled"
+
+    /** Comma-separated provider failover priority order. */
+    const val FAILOVER_ORDER = "failover_order"
+
+    /** Default failover priority order across providers. */
+    const val DEFAULT_FAILOVER_ORDER = "gemini,groq,custom"
 }

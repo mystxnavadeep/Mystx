@@ -1,6 +1,7 @@
 package com.mystx.app.ui.processtext
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,10 +16,11 @@ import com.mystx.app.manager.StatsManager
 import com.mystx.app.model.HistoryManager
 import com.mystx.app.model.Command
 import com.mystx.app.model.CommandType
+import com.mystx.app.model.PrefKeys
 import com.mystx.app.model.PromptPlaceholders
 import com.mystx.app.model.RichCommand
 import com.mystx.app.service.CommandOutcome
-import com.mystx.app.service.runTextCommand
+import com.mystx.app.service.runTextCommandStream
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +40,7 @@ sealed interface UiState {
      */
     data object Initializing : UiState
     data class CommandList(val commands: List<Command>) : UiState
-    data class Loading(val command: Command) : UiState
+    data class Loading(val command: Command, val streamingText: String = "") : UiState
     data class Preview(val result: String, val canInsert: Boolean) : UiState
     /** [retry] is null for failures that re-running cannot fix (e.g. nothing configured). */
     data class Error(val message: String, val retry: Command? = null) : UiState
@@ -67,7 +69,7 @@ class ProcessTextViewModel(
     private val keyManager by lazy { (app as MystxApp).keyManager }
     private val commandManager by lazy { CommandManager(app) }
     private val commandStudioStore by lazy { CommandStudioStore(app, commandManager) }
-    private val statsManager by lazy { StatsManager(app) }
+    private val statsManager by lazy { (app as? com.mystx.app.MystxApp)?.statsManager ?: StatsManager(app) }
     private val geminiClient by lazy { GeminiClient() }
     private val openAIClient by lazy { OpenAICompatibleClient() }
 
@@ -142,7 +144,7 @@ class ProcessTextViewModel(
                 val finalPrompt = PromptPlaceholders.render(richCommand.promptTemplate, context)
 
                 val cached = withContext(Dispatchers.IO) {
-                    HistoryManager.findCachedResponse(getApplication(), selection.text, richCommand.trigger)
+                    HistoryManager.findCachedResponse(getApplication(), selection.text, richCommand.trigger, isSelection = true)
                 }
                 if (cached != null) {
                     try {
@@ -156,13 +158,35 @@ class ProcessTextViewModel(
 
                 // On IO: KeyManager is Keystore-backed and prefs are disk-backed, both read on
                 // whatever dispatcher calls them (the HTTP clients switch to IO themselves).
+                val appContext = getApplication<Application>()
+                val streamedBuffer = StringBuilder()
                 val outcome = withTimeout(REQUEST_TIMEOUT_MS) {
                     withContext(Dispatchers.IO) {
-                        runTextCommand(
-                            getApplication<Application>(), keyManager, geminiClient, openAIClient,
-                            finalPrompt, selection.text,
-                            modelOverride = richCommand.modelOverride,
-                            temperatureOverride = richCommand.temperature
+                        val prefs = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                        val effectiveTemp = richCommand.temperature
+                            ?: prefs.getFloat(PrefKeys.TEMPERATURE, 0.5f)
+                        runTextCommandStream(
+                            context = appContext,
+                            prefs = prefs,
+                            keyManager = keyManager,
+                            geminiClient = geminiClient,
+                            openAIClient = openAIClient,
+                            prompt = finalPrompt,
+                            text = selection.text,
+                            temperature = effectiveTemp,
+                            onChunk = { chunk ->
+                                if (chunk.isNotEmpty()) {
+                                    val partialText = synchronized(streamedBuffer) {
+                                        streamedBuffer.append(chunk)
+                                        streamedBuffer.toString()
+                                    }
+                                    viewModelScope.launch(Dispatchers.Main.immediate) {
+                                        if (_uiState.value is UiState.Loading) {
+                                            _uiState.value = UiState.Loading(command, partialText)
+                                        }
+                                    }
+                                }
+                            }
                         )
                     }
                 }

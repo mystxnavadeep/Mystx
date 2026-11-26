@@ -114,6 +114,13 @@ fun SettingsScreen(
     var explainLanguage by remember { mutableStateOf(prefs.getString(PrefKeys.EXPLAIN_LANGUAGE, "Tenglish") ?: "Tenglish") }
     var saveLangJob by remember { mutableStateOf<Job?>(null) }
     var temperature by remember { mutableStateOf(prefs.getFloat(PrefKeys.TEMPERATURE, 0.5f)) }
+    var failoverEnabled by remember { mutableStateOf(prefs.getBoolean(PrefKeys.FAILOVER_ENABLED, false)) }
+    var failoverOrder by remember {
+        mutableStateOf(
+            prefs.getString(PrefKeys.FAILOVER_ORDER, PrefKeys.DEFAULT_FAILOVER_ORDER)
+                ?: PrefKeys.DEFAULT_FAILOVER_ORDER
+        )
+    }
 
     val prefixErrorLength = stringResource(R.string.settings_prefix_error_length)
     val prefixErrorWhitespace = stringResource(R.string.settings_prefix_error_whitespace)
@@ -658,6 +665,72 @@ fun SettingsScreen(
                     inactiveTrackColor = MaterialTheme.colorScheme.outline
                 )
             )
+            Spacer(modifier = Modifier.height(14.dp))
+            MystDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = "Auto Provider Failover",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Automatically fall back to another provider if all keys hit rate limits",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = failoverEnabled,
+                    onCheckedChange = { enabled ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        failoverEnabled = enabled
+                        prefs.edit().putBoolean(PrefKeys.FAILOVER_ENABLED, enabled).apply()
+                    }
+                )
+            }
+            if (failoverEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Failover Order",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                val failoverOptions = listOf(
+                    "gemini,groq,custom" to "Gemini → Groq → Custom",
+                    "groq,gemini,custom" to "Groq → Gemini → Custom",
+                    "custom,gemini,groq" to "Custom → Gemini → Groq"
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    failoverOptions.forEach { (orderValue, orderLabel) ->
+                        FilterChip(
+                            selected = failoverOrder == orderValue,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                failoverOrder = orderValue
+                                prefs.edit().putString(PrefKeys.FAILOVER_ORDER, orderValue).apply()
+                            },
+                            label = {
+                                Text(
+                                    text = orderLabel,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(4.dp))
         }
 
