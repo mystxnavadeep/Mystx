@@ -219,7 +219,7 @@ fun SettingsScreen(
                             val text = sb.toString().removePrefix("\uFEFF")
                             if (text.length > maxChars) null else text
                         } ?: return@withContext false
-                        commandStudioStore.importBackupJson(json)
+                        commandStudioStore.importBackupJson(json) > 0
                     }
                     if (imported) {
                         backupMessage = importSuccessMsg
