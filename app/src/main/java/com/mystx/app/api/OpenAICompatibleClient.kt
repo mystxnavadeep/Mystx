@@ -1,7 +1,10 @@
 package com.mystx.app.api
 
 import com.mystx.app.provider.EndpointValidator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,19 +18,40 @@ class OpenAICompatibleClient {
 
     companion object {
         private val HTTP_PREFIX_REGEX = Regex("^HTTP_\\d+:\\s*")
+        private val CLOUD_KEY_PREFIXES = listOf("sk-", "gsk_", "AIza", "xai-", "sk-ant-")
+    }
+
+    private fun sanitizeKeyForEndpoint(apiKey: String?, endpoint: String): Result<String> {
+        val cleanKey = apiKey?.replace("\r", "")?.replace("\n", "")?.trim() ?: ""
+        if (cleanKey.isNotEmpty() && endpoint.trim().startsWith("http://", ignoreCase = true)) {
+            if (CLOUD_KEY_PREFIXES.any { cleanKey.startsWith(it) }) {
+                val msg = "Refusing to send a cloud API key over cleartext http:// endpoint. Use https:// instead."
+                return Result.failure(ApiException(ApiError.Other(msg), msg))
+            }
+        }
+        return Result.success(cleanKey)
     }
 
     suspend fun validateKey(apiKey: String, endpoint: String): Result<String> = withContext(Dispatchers.IO) {
         if (EndpointValidator.validate(endpoint) != EndpointValidator.Error.NONE) {
             return@withContext Result.failure(Exception("Endpoint must be https:// or an http:// private-LAN address"))
         }
+        val cleanKey = sanitizeKeyForEndpoint(apiKey, endpoint).getOrElse {
+            return@withContext Result.failure(it)
+        }
         var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
         try {
             val baseUrl = endpoint.trimEnd('/')
             connection = URL("$baseUrl/models")
                 .openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
             connection.requestMethod = "GET"
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (cleanKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+            }
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000
 
@@ -40,7 +64,10 @@ class OpenAICompatibleClient {
                 Result.success("Valid")
             } else {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    cleanKey
+                )
 
                 when (responseCode) {
                     429 -> Result.failure(Exception("Rate limited. Please try again later."))
@@ -59,7 +86,7 @@ class OpenAICompatibleClient {
                         // under /v1; the stored endpoint may just be missing that suffix.
                         connection?.disconnect()
                         connection = null
-                        if (probeModels("$baseUrl/v1/models", apiKey)) {
+                        if (!baseUrl.endsWith("/v1") && probeModels("$baseUrl/v1/models", cleanKey)) {
                             Result.failure(Exception(ApiClientUtils.NEEDS_V1_MARKER))
                         } else {
                             val detail = if (apiMessage.isNotEmpty()) apiMessage else "Unexpected error"
@@ -72,23 +99,33 @@ class OpenAICompatibleClient {
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unexpected error", cleanKey)
+            Result.failure(Exception(safeMsg))
         } finally {
+            completionHandle?.dispose()
             connection?.disconnect()
         }
     }
 
     /**
      * GETs [url] and reports whether the server answered 2xx. Used by [validateKey]'s
-     * /v1 fallback probe — a 200 here proves the endpoint is reachable, nothing more.
+     * and [doGenerate]'s /v1 fallback probe — a 200 here proves the endpoint is reachable.
      */
-    private fun probeModels(url: String, apiKey: String): Boolean {
+    private suspend fun probeModels(url: String, cleanKey: String): Boolean {
         var probe: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) probe?.disconnect()
+        }
         return try {
             probe = URL(url).openConnection() as HttpURLConnection
+            probe.instanceFollowRedirects = false
             probe.requestMethod = "GET"
-            probe.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (cleanKey.isNotBlank()) {
+                probe.setRequestProperty("Authorization", "Bearer $cleanKey")
+            }
             probe.connectTimeout = 15_000
             probe.readTimeout = 15_000
             val code = probe.responseCode
@@ -99,9 +136,12 @@ class OpenAICompatibleClient {
                 }
             }
             code in 200..299
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             false
         } finally {
+            completionHandle?.dispose()
             probe?.disconnect()
         }
     }
@@ -129,6 +169,9 @@ class OpenAICompatibleClient {
         if (EndpointValidator.validate(endpoint) != EndpointValidator.Error.NONE) {
             return@withContext Result.failure(Exception("Endpoint must be https:// or an http:// private-LAN address"))
         }
+        val cleanKey = sanitizeKeyForEndpoint(apiKey, endpoint).getOrElse {
+            return@withContext Result.failure(it)
+        }
         val baseUrl = endpoint.trimEnd('/')
         var lastDetail: String? = null
         // Set on the first 2xx, whatever the body: a server that answered is reachable even
@@ -136,9 +179,12 @@ class OpenAICompatibleClient {
         var reachable = false
         for (path in listOf("$baseUrl/v1/models", "$baseUrl/models", "$baseUrl/api/tags", "$baseUrl/api/models")) {
             val probe = try {
-                httpGet(path, apiKey)
+                httpGet(path, cleanKey)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                return@withContext Result.failure(e)
+                val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unexpected error", cleanKey)
+                return@withContext Result.failure(Exception(safeMsg))
             }
             when {
                 probe.code in 200..299 -> {
@@ -148,7 +194,10 @@ class OpenAICompatibleClient {
                     // Reachable but empty at this path — try the next one.
                 }
                 probe.code == 401 || probe.code == 403 -> {
-                    val apiMessage = ApiClientUtils.extractApiErrorMessage(probe.body)
+                    val apiMessage = ApiClientUtils.redactSecrets(
+                        ApiClientUtils.extractApiErrorMessage(probe.body),
+                        cleanKey
+                    )
                     val signinUrl = ApiClientUtils.extractSigninUrl(probe.body)
                     val detail = when {
                         signinUrl != null || apiMessage.contains("not currently signed in", ignoreCase = true) ->
@@ -161,7 +210,10 @@ class OpenAICompatibleClient {
                 else -> {
                     // 404/405/5xx — this path is not served here; remember the detail and
                     // try the next one.
-                    val apiMessage = ApiClientUtils.extractApiErrorMessage(probe.body)
+                    val apiMessage = ApiClientUtils.redactSecrets(
+                        ApiClientUtils.extractApiErrorMessage(probe.body),
+                        cleanKey
+                    )
                     lastDetail = if (apiMessage.isNotEmpty()) apiMessage else "Unexpected error"
                 }
             }
@@ -173,13 +225,17 @@ class OpenAICompatibleClient {
     private data class Probe(val code: Int, val body: String)
 
     /** GETs [url], returning the status code and the (bounded) body on either stream. */
-    private fun httpGet(url: String, apiKey: String?): Probe {
+    private suspend fun httpGet(url: String, cleanKey: String): Probe {
         var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
         return try {
             connection = URL(url).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
             connection.requestMethod = "GET"
-            if (!apiKey.isNullOrBlank()) {
-                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (cleanKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $cleanKey")
             }
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000
@@ -187,7 +243,10 @@ class OpenAICompatibleClient {
             val body = if (code in 200..299) ApiClientUtils.readResponseBounded(connection)
             else ApiClientUtils.readErrorBody(connection)
             Probe(code, body)
+        } catch (e: CancellationException) {
+            throw e
         } finally {
+            completionHandle?.dispose()
             connection?.disconnect()
         }
     }
@@ -224,7 +283,7 @@ class OpenAICompatibleClient {
         return result
     }
 
-    private fun doGenerate(
+    private suspend fun doGenerate(
         prompt: String,
         text: String,
         apiKey: String,
@@ -237,22 +296,33 @@ class OpenAICompatibleClient {
         if (EndpointValidator.validate(endpoint) != EndpointValidator.Error.NONE) {
             return Result.failure(Exception("Endpoint must be https:// or an http:// private-LAN address"))
         }
+        val cleanKey = sanitizeKeyForEndpoint(apiKey, endpoint).getOrElse {
+            return Result.failure(it)
+        }
         var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
         return try {
             val baseUrl = endpoint.trimEnd('/')
             connection = URL("$baseUrl/chat/completions")
                 .openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (cleanKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+            }
             connection.doOutput = true
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
 
+            val boundaryTag = ApiClientUtils.generateBoundaryTag()
+            val systemPrefix = ApiClientUtils.buildSystemPromptPrefix(boundaryTag)
             val systemContent = if (withJsonObject) {
-                ApiClientUtils.SYSTEM_PROMPT_PREFIX + prompt + " Respond with JSON: {\"text\": \"your result\"}"
+                systemPrefix + prompt + " Respond with JSON: {\"text\": \"your result\"}"
             } else {
-                ApiClientUtils.SYSTEM_PROMPT_PREFIX + prompt
+                systemPrefix + prompt
             }
 
             val jsonBody = JSONObject().apply {
@@ -265,7 +335,7 @@ class OpenAICompatibleClient {
                     })
                     put(JSONObject().apply {
                         put("role", "user")
-                        put("content", ApiClientUtils.wrapUserText(text))
+                        put("content", ApiClientUtils.wrapUserTextWithTag(text, boundaryTag))
                     })
                 })
                 put("temperature", temperature)
@@ -291,22 +361,30 @@ class OpenAICompatibleClient {
                 val jsonResponse = JSONObject(response)
                 val choices = jsonResponse.optJSONArray("choices")
                 if (choices != null && choices.length() > 0) {
-                    val choice = choices.getJSONObject(0)
+                    val choice = choices.optJSONObject(0)
+                        ?: return Result.failure(Exception("No choices found in response"))
 
-                    val finishReason = choice.optString("finish_reason", "")
+                    val finishReason = choice.optStringOrNull("finish_reason") ?: ""
                     if (finishReason == "content_filter") {
                         return Result.failure(Exception("Response blocked by content filter"))
                     }
 
                     val message = choice.optJSONObject("message")
-                    var resultText = message?.optString("content", "") ?: ""
+                    val refusal = message?.optStringOrNull("refusal")
+                    if (!refusal.isNullOrBlank()) {
+                        return Result.failure(Exception("Response refused by model"))
+                    }
+                    var resultText = message?.optStringOrNull("content") ?: ""
                     if (resultText.isBlank()) {
                         return Result.failure(Exception("Model returned empty response"))
                     }
 
+                    val isTruncated = finishReason == "length"
                     if (withJsonObject) {
                         val (extracted, parseFailed) = ApiClientUtils.tryExtractStructuredText(resultText)
-                        if (extracted != null) return Result.success(GenerateResult(extracted))
+                        if (extracted != null) {
+                            return Result.success(GenerateResult(extracted, truncated = isTruncated))
+                        }
                         // Do not fall through with a raw JSON payload — that pasted literal
                         // JSON such as {"text": ""} (parsed, no usable field) or a truncated
                         // object (unparseable but clearly JSON) into the user's text field.
@@ -318,31 +396,35 @@ class OpenAICompatibleClient {
                         // but flag it so the caller disables JSON mode for 24h.
                         resultText = ApiClientUtils.stripMarkdownFences(resultText)
                         return Result.success(GenerateResult(
-                            resultText, structuredOutputFailed = true, truncated = finishReason == "length"))
+                            resultText, structuredOutputFailed = true, truncated = isTruncated))
                     }
 
                     resultText = ApiClientUtils.stripMarkdownFences(resultText)
-                    Result.success(GenerateResult(resultText, truncated = finishReason == "length"))
+                    Result.success(GenerateResult(resultText, truncated = isTruncated))
                 } else {
                     Result.failure(Exception("No choices found in response"))
                 }
             } else if (responseCode == 413) {
-                // Request too large for this key's per-minute token budget. Groq enforces
-                // TPM per organization, so another key (different org) may still have
-                // headroom. Classified as a rate limit so the caller cools this key down
-                // briefly and rotates, instead of hard-failing the whole command.
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    cleanKey
+                )
                 val detail = if (apiMessage.isNotEmpty()) apiMessage else "Request too large"
                 Result.failure(ApiException(ApiError.RequestTooLarge(detail), detail))
             } else if (responseCode == 429) {
                 val retryAfter = connection.getHeaderField("Retry-After")
-                val seconds = retryAfter?.toIntOrNull()
+                val seconds = ApiClientUtils.parseRetryAfterSeconds(retryAfter)
+                    ?.coerceIn(0L, Int.MAX_VALUE.toLong())
+                    ?.toInt()
                 val msg = if (seconds != null) "Rate limit exceeded, retry after ${seconds}s" else "Rate limit exceeded"
                 Result.failure(ApiException(ApiError.RateLimit(msg, seconds), msg))
             } else if (responseCode == 400 || responseCode == 422) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    cleanKey
+                )
                 val detail = if (apiMessage.isNotEmpty()) apiMessage else "Bad request"
                 // Keep the machine-readable reason: Groq puts json_validate_failed in
                 // error.code, not error.message, and that code is the only thing separating
@@ -354,7 +436,10 @@ class OpenAICompatibleClient {
                 Result.failure(Exception("HTTP_${responseCode}: $withCode"))
             } else if (responseCode == 401 || responseCode == 403) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    cleanKey
+                )
                 val signinUrl = ApiClientUtils.extractSigninUrl(errorBody)
                 val detail = when {
                     signinUrl != null || apiMessage.contains("not currently signed in", ignoreCase = true) ->
@@ -365,7 +450,19 @@ class OpenAICompatibleClient {
                 Result.failure(ApiException(ApiError.InvalidKey(detail), detail))
             } else {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                var detail = ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)")
+                if (responseCode == 404 && !baseUrl.endsWith("/v1")) {
+                    connection?.disconnect()
+                    connection = null
+                    if (probeModels("$baseUrl/v1/models", cleanKey)) {
+                        return Result.failure(
+                            ApiException(ApiError.Other(ApiClientUtils.NEEDS_V1_MARKER), ApiClientUtils.NEEDS_V1_MARKER)
+                        )
+                    }
+                }
+                var detail = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)"),
+                    cleanKey
+                )
                 // Groq reports an unknown or inaccessible model as HTTP 404 with the reason only
                 // in error.code ("model_not_found"); its message ("The model `x` does not exist or
                 // you do not have access to it.") matches none of the localized patterns, so the
@@ -377,17 +474,21 @@ class OpenAICompatibleClient {
                 val apiError = if (responseCode in 500..599) ApiError.ServerError(detail) else ApiError.Other(detail)
                 Result.failure(ApiException(apiError, detail))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unknown error", cleanKey)
             val apiError = when (e) {
                 is ApiException -> e.apiError
-                is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException -> ApiError.Network(e.message ?: "Network error")
+                is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException ->
+                    ApiError.Network(ApiClientUtils.redactSecrets(e.message ?: "Network error", cleanKey))
                 is org.json.JSONException -> ApiError.Other("Invalid response from server")
-                else -> ApiError.Other(e.message ?: "Unknown error")
+                else -> ApiError.Other(safeMsg)
             }
-            if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, e.message ?: "Unknown error"))
+            if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, safeMsg))
         } finally {
+            completionHandle?.dispose()
             connection?.disconnect()
         }
     }
 }
-

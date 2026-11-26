@@ -36,6 +36,8 @@ jobs:
       - name: Resolve PR number and artifact
         id: resolve
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          INPUT_RUN_ID: ${{ inputs.run_id }}
         with:
           script: |
             // Resolve workflow run (either the triggering run or a manual run_id)
@@ -43,7 +45,7 @@ jobs:
             let prNumber = null;
 
             if (context.eventName === 'workflow_dispatch') {
-              const inputRunId = '${{ inputs.run_id }}';
+              const inputRunId = (process.env.INPUT_RUN_ID || '').trim();
               if (inputRunId) {
                 const { data } = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', {
                   owner: context.repo.owner,
@@ -172,13 +174,19 @@ jobs:
             });
             const artifacts = artData.artifacts || [];
             core.info(`Found ${artifacts.length} artifacts for run ${run.id}: ${artifacts.map(a=>a.name).join(', ')}`);
-            const preview = artifacts.find(a => a.name.startsWith('Mystx-preview-pr'));
+            const ARTIFACT_NAME_RE = /^Mystx-preview-pr\d+$/;
+            const preview = artifacts.find(a => ARTIFACT_NAME_RE.test(a.name));
             if (!preview) {
-              core.info('No Mystx-preview-pr* artifact found — skipping. Lint/test-only runs or expired artifact.');
+              core.info('No valid Mystx-preview-pr<digits> artifact found — skipping. Lint/test-only runs or expired artifact.');
               // Check if any artifact at all
               if (artifacts.length === 0) {
                 core.info('No artifacts — workflow may not have produced preview APK (e.g. paths filter excluded it)');
               }
+              return;
+            }
+
+            if (!ARTIFACT_NAME_RE.test(preview.name)) {
+              core.info(`Artifact name "${preview.name}" failed strict validation — skipping comment`);
               return;
             }
 
@@ -208,18 +216,29 @@ jobs:
       - name: Create or update comment (idempotent)
         if: steps.resolve.outputs.pr != ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ steps.resolve.outputs.pr }}
+          RUN_ID: ${{ steps.resolve.outputs.run_id }}
+          ARTIFACT_NAME: ${{ steps.resolve.outputs.artifact }}
+          ARTIFACT_ID: ${{ steps.resolve.outputs.artifact_id }}
+          SIZE_MB: ${{ steps.resolve.outputs.size_mb }}
+          SIZE_BYTES: ${{ steps.resolve.outputs.size_bytes }}
+          SHORT_SHA: ${{ steps.resolve.outputs.short_sha }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          RUN_URL: ${{ steps.resolve.outputs.run_url }}
+          ARTIFACT_URL: ${{ steps.resolve.outputs.artifact_url }}
         with:
           script: |
-            const pr = parseInt('${{ steps.resolve.outputs.pr }}', 10);
-            const runId = '${{ steps.resolve.outputs.run_id }}';
-            const artifact = '${{ steps.resolve.outputs.artifact }}';
-            const artifactId = '${{ steps.resolve.outputs.artifact_id }}';
-            const sizeMB = '${{ steps.resolve.outputs.size_mb }}';
-            const sizeBytes = '${{ steps.resolve.outputs.size_bytes }}';
-            const shortSha = '${{ steps.resolve.outputs.short_sha }}';
-            const headSha = '${{ steps.resolve.outputs.head_sha }}';
-            const runUrl = '${{ steps.resolve.outputs.run_url }}';
-            const artifactUrl = '${{ steps.resolve.outputs.artifact_url }}';
+            const pr = parseInt(process.env.PR_NUMBER || '', 10);
+            const runId = process.env.RUN_ID || '';
+            const artifact = process.env.ARTIFACT_NAME || '';
+            const artifactId = process.env.ARTIFACT_ID || '';
+            const sizeMB = process.env.SIZE_MB || '';
+            const sizeBytes = process.env.SIZE_BYTES || '';
+            const shortSha = process.env.SHORT_SHA || '';
+            const headSha = process.env.HEAD_SHA || '';
+            const runUrl = process.env.RUN_URL || '';
+            const artifactUrl = process.env.ARTIFACT_URL || '';
 
             const body = `### 📦 Preview APK — PR #${pr} · \`${shortSha}\` · \`${sizeMB} MB\`
 

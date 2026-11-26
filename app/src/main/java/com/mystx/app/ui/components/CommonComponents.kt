@@ -1,6 +1,5 @@
 package com.mystx.app.ui.components
 
-import androidx.compose.ui.window.DialogProperties
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -11,11 +10,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +23,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,6 +50,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -62,6 +60,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.mystx.app.R
 import com.mystx.app.ui.theme.mystBrandGradient
 
@@ -84,13 +83,14 @@ internal val MystCompactShape = RoundedCornerShape(16.dp)
 val MystDropdownShape = RoundedCornerShape(14.dp)
 
 /**
- * Background container color for dropdown popups — semi-opaque dark MYSTX glass that
- * prevents underlying text/controls from bleeding through.
+ * Background container color for dropdown popups — derived from the active
+ * MaterialTheme colorScheme rather than system dark mode so light-mode devices
+ * stay readable against the dark glass theme.
  */
 @Composable
 fun mystDropdownContainerColor(): Color {
-    val dark = isSystemInDarkTheme()
-    return if (dark) Color(0xF80B1C24) else Color(0xF8FFFFFF)
+    val isDarkScheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (isDarkScheme) Color(0xF80B1C24) else Color(0xF8FFFFFF)
 }
 
 /** The brand gradient, left to right: cyan -> teal. */
@@ -458,11 +458,12 @@ fun MystDialog(
     dismissLabel: String? = null,
     isCancellable: Boolean = true
 ) {
+    val isDarkScheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
     AlertDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(dismissOnBackPress = isCancellable, dismissOnClickOutside = isCancellable),
         shape = MystCardShape,
-        containerColor = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
+        containerColor = if (isDarkScheme) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
         title = {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp)
         },
@@ -529,10 +530,8 @@ fun MystDock(
                             else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                         )
                         .clickable {
-                            if (!isSelected) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onSelect(index)
-                            }
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onSelect(index)
                         }
                         .graphicsLayer {
                             scaleX = scale

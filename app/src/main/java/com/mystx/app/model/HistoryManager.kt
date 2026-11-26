@@ -1,6 +1,7 @@
 package com.mystx.app.model
 
 import android.content.Context
+import com.mystx.app.manager.AndroidKeystoreCipher
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -8,7 +9,7 @@ import java.io.File
 object HistoryManager {
     private const val MAX_HISTORY = 100
     private const val FILE_NAME = "history.json"
-    
+
     data class HistoryItem(
         val originalText: String,
         val commandTrigger: String,
@@ -25,7 +26,7 @@ object HistoryManager {
                 put("isSelection", isSelection)
             }
         }
-        
+
         companion object {
             fun fromJson(json: JSONObject): HistoryItem {
                 return HistoryItem(
@@ -39,6 +40,7 @@ object HistoryManager {
         }
     }
 
+    private val cipher by lazy { AndroidKeystoreCipher() }
     private var cachedHistory = mutableListOf<HistoryItem>()
     private var isLoaded = false
 
@@ -51,25 +53,44 @@ object HistoryManager {
             return
         }
         try {
-            val content = file.readText()
+            val raw = file.readText()
+            val isPlaintext = raw.trimStart().startsWith("[")
+            val content = if (isPlaintext) {
+                raw
+            } else {
+                cipher.decrypt(raw) ?: return
+            }
             val array = JSONArray(content)
             for (i in 0 until array.length()) {
                 cachedHistory.add(HistoryItem.fromJson(array.getJSONObject(i)))
             }
             // Sort descending by timestamp
             cachedHistory.sortByDescending { it.timestamp }
-        } catch (_: Exception) {}
-        isLoaded = true
+            isLoaded = true
+            if (isPlaintext && cipher.available) {
+                saveHistory(context)
+            }
+        } catch (_: Exception) {
+            isLoaded = true
+        }
     }
 
     @Synchronized
     private fun saveHistory(context: Context) {
         val file = File(context.filesDir, FILE_NAME)
+        val tmpFile = File(context.filesDir, "$FILE_NAME.tmp")
         try {
             val array = JSONArray()
             cachedHistory.forEach { array.put(it.toJson()) }
-            file.writeText(array.toString())
-        } catch (_: Exception) {}
+            val encrypted = cipher.encrypt(array.toString())
+            tmpFile.writeText(encrypted)
+            if (!tmpFile.renameTo(file)) {
+                tmpFile.copyTo(file, overwrite = true)
+                tmpFile.delete()
+            }
+        } catch (_: Exception) {
+            try { tmpFile.delete() } catch (_: Exception) {}
+        }
     }
 
     @Synchronized
@@ -91,9 +112,18 @@ object HistoryManager {
         return cachedHistory.toList()
     }
 
-    fun findCachedResponse(context: Context, originalText: String, commandTrigger: String): String? {
+    @Synchronized
+    fun findCachedResponse(
+        context: Context,
+        originalText: String,
+        commandTrigger: String,
+        isSelection: Boolean = false
+    ): String? {
         loadHistory(context)
-        // Only fetch cache for non-selection (keyboard typed) items
-        return cachedHistory.find { it.originalText == originalText && it.commandTrigger == commandTrigger }?.response
+        return cachedHistory.find {
+            it.originalText == originalText &&
+                it.commandTrigger == commandTrigger &&
+                it.isSelection == isSelection
+        }?.response
     }
 }

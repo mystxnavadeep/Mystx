@@ -99,7 +99,9 @@ data class CommandMeta(
         obj.put("category", category.id)
         if (promptTemplate != null) obj.put("prompt", promptTemplate)
         if (modelOverride != null) obj.put("model", modelOverride)
-        if (temperature != null) obj.put("temp", temperature.toDouble())
+        if (temperature != null && !temperature.isNaN()) {
+            obj.put("temp", temperature.coerceIn(0f, 2f).toDouble())
+        }
         obj.put("enabled", enabled)
         return obj.toString()
     }
@@ -108,11 +110,18 @@ data class CommandMeta(
         fun fromJson(json: String): CommandMeta? = try {
             val obj = JSONObject(json)
             CommandMeta(
-                name = obj.optString("name", ""),
-                category = CommandCategory.fromId(obj.optString("category", CommandCategory.CUSTOM.id)),
-                promptTemplate = obj.optString("prompt", "").takeIf { it.isNotEmpty() },
-                modelOverride = obj.optString("model", "").takeIf { it.isNotEmpty() },
-                temperature = if (obj.has("temp")) obj.getDouble("temp").toFloat() else null,
+                name = if (obj.isNull("name")) "" else obj.optString("name", ""),
+                category = CommandCategory.fromId(
+                    if (obj.isNull("category")) CommandCategory.CUSTOM.id
+                    else obj.optString("category", CommandCategory.CUSTOM.id)
+                ),
+                promptTemplate = if (obj.isNull("prompt")) null else obj.optString("prompt", "").takeIf { it.isNotEmpty() },
+                modelOverride = if (obj.isNull("model")) null else obj.optString("model", "").takeIf { it.isNotEmpty() },
+                temperature = if (!obj.isNull("temp")) {
+                    obj.optDouble("temp").takeIf { !it.isNaN() }?.toFloat()?.coerceIn(0f, 2f)
+                } else {
+                    null
+                },
                 enabled = obj.optBoolean("enabled", true)
             )
         } catch (_: Exception) {

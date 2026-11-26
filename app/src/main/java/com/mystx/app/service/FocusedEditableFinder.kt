@@ -55,13 +55,12 @@ internal object FocusedEditableFinder {
             try {
                 if (remaining <= 0 || depth > MAX_DEPTH) return null
                 remaining--
-                // Defense-in-depth: password fields are also editable+focused but must never be
-                // returned as a typing target. The caller in AssistantService also checks
-                // isPassword after the fallback, but filtering here prevents future reuse from
-                // leaking password nodes if that check is ever forgotten.
+                // Defense-in-depth: password fields (and their subtrees) must never be
+                // returned as a typing target or traversed further; recycled in finally.
                 if (node.isPassword) {
-                    // Fall through to child scan — do not keep this node, recycle in finally.
-                } else if (node.isEditable && node.isFocused) {
+                    return null
+                }
+                if (node.isEditable && node.isFocused) {
                     keep = true
                     return node
                 }

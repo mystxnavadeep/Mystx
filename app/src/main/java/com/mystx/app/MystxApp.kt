@@ -1,5 +1,6 @@
 package com.mystx.app
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.util.Log
@@ -9,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.mystx.app.manager.KeyManager
+import com.mystx.app.manager.StatsManager
 import com.mystx.app.worker.UpdateCheckWorker
 import java.util.concurrent.TimeUnit
 
@@ -23,6 +25,9 @@ class MystxApp : Application() {
      * Lazy so the Keystore round trip in the constructor stays off Application.onCreate.
      */
     val keyManager: KeyManager by lazy { KeyManager(this) }
+
+    /** Shared StatsManager instance for the process. */
+    val statsManager: StatsManager by lazy { StatsManager(this) }
 
     companion object {
         const val TAG = "MystxCrash"
@@ -50,13 +55,14 @@ class MystxApp : Application() {
      * it — without this marker both look like a silent "went inactive" (#125). The previous
      * handler is still invoked afterwards; the process still dies as the platform intends.
      */
+    @SuppressLint("ApplySharedPref")
     private fun installCrashMarker() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
                 Log.e(TAG, "uncaught exception on thread " + thread.name, throwable)
                 getSharedPreferences("settings", Context.MODE_PRIVATE)
-                    .edit().putLong(PREF_SERVICE_DIED_AT, System.currentTimeMillis()).apply()
+                    .edit().putLong(PREF_SERVICE_DIED_AT, System.currentTimeMillis()).commit()
             } catch (_: Exception) {
             } finally {
                 previous?.uncaughtException(thread, throwable)

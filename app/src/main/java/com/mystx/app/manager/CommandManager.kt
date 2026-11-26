@@ -3,13 +3,16 @@ package com.mystx.app.manager
 import android.content.Context
 import android.content.SharedPreferences
 import com.mystx.app.model.Command
+import com.mystx.app.model.CommandMeta
 import com.mystx.app.model.CommandType
+import com.mystx.app.model.RichCommand
 import org.json.JSONArray
 import org.json.JSONObject
 
 class CommandManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("commands", Context.MODE_PRIVATE)
     private val settingsPrefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val studioPrefs: SharedPreferences = context.getSharedPreferences("command_studio", Context.MODE_PRIVATE)
 
     @Volatile
     private var cachedCommands: List<Command>? = null
@@ -55,12 +58,12 @@ class CommandManager(context: Context) {
         fun isValidCommand(trigger: String, prompt: String, prefix: String): Boolean =
             trigger.isNotBlank() && prompt.isNotBlank() &&
                 trigger.length <= MAX_TRIGGER_LENGTH && prompt.length <= MAX_PROMPT_LENGTH &&
-                trigger.startsWith(prefix) && trigger.length > prefix.length
+                trigger.startsWith(prefix) && trigger.length > prefix.length &&
+                trigger.substring(prefix.length).isNotBlank()
     }
 
     // System commands — local operations that cannot be edited or deleted
     private val systemDefinitions = listOf(
-        "mystx" to "Show Mystx popup menu.",
         "undo" to "Undo the last replacement and restore the original text.",
         "copy" to "Copy the text to clipboard.",
         "cut" to "Cut the text to clipboard.",
@@ -110,7 +113,7 @@ class CommandManager(context: Context) {
         val newArr = JSONArray()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
-            val oldTrigger = obj.optString("trigger", "")
+            val oldTrigger = obj.optString("trigger", "").trim()
             val prompt = obj.optString("prompt", "")
             if (oldTrigger.isEmpty() || prompt.isEmpty()) continue
             val migrated = if (!oldTrigger.startsWith(newPrefix)) {
@@ -118,6 +121,8 @@ class CommandManager(context: Context) {
                 val stripped = if (!oldTrigger[0].isLetterOrDigit()) oldTrigger.substring(1) else oldTrigger
                 newPrefix + stripped
             } else oldTrigger
+            // Guard against creating 1-char / prefix-only triggers during migration
+            if (migrated.length <= newPrefix.length || migrated.substring(newPrefix.length).isBlank()) continue
             val newObj = JSONObject()
             newObj.put("trigger", migrated)
             newObj.put("prompt", prompt)
@@ -273,18 +278,18 @@ class CommandManager(context: Context) {
      * to [MAX_PROMPT_LENGTH], unknown types default to [CommandType.AI], and unusable entries
      * (blank trigger/prompt) are dropped. The result is capped at [MAX_CUSTOM_COMMANDS].
      */
-        @Synchronized fun importCommands(json: String): Boolean {
+    @Synchronized fun importCommands(json: String): Boolean {
         return try {
             val arr = JSONArray(json)
             if (arr.length() == 0) return true
-            
+
             val prefix = getTriggerPrefix()
             val existingStr = prefs.getString("custom_commands", "[]") ?: "[]"
             val existingArr = try { JSONArray(existingStr) } catch (_: Exception) { JSONArray() }
-            
+
             // Map to prevent duplicates. Key is the trigger.
             val mergedMap = LinkedHashMap<String, JSONObject>()
-            
+
             // Load existing
             for (i in 0 until existingArr.length()) {
                 val obj = existingArr.optJSONObject(i) ?: continue
@@ -293,7 +298,7 @@ class CommandManager(context: Context) {
                     mergedMap[t] = obj
                 }
             }
-            
+
             // Merge new
             var importedCount = 0
             for (i in 0 until arr.length()) {
@@ -307,23 +312,23 @@ class CommandManager(context: Context) {
                     trigger = prefix + stripped
                 }
                 trigger = trigger.take(MAX_TRIGGER_LENGTH)
-                if (trigger.length <= prefix.length) continue
+                if (trigger.length <= prefix.length || trigger.substring(prefix.length).isBlank()) continue
                 val type = obj.optString("type", CommandType.AI.name)
                 val out = JSONObject()
                 out.put("trigger", trigger)
                 out.put("prompt", prompt)
                 out.put("type",
                     if (type == CommandType.TEXT_REPLACER.name) CommandType.TEXT_REPLACER.name else CommandType.AI.name)
-                
+
                 mergedMap[trigger] = out
                 importedCount++
             }
-            
+
             if (arr.length() > 0 && importedCount == 0) return false
-            
+
             val cleaned = JSONArray()
             mergedMap.values.forEach { cleaned.put(it) }
-            
+
             prefs.edit().putString("custom_commands", cleaned.toString()).apply()
             invalidateCache()
             true
@@ -332,23 +337,49 @@ class CommandManager(context: Context) {
         }
     }
 
+    private fun isTriggerEnabled(trigger: String): Boolean {
+        val key = RichCommand.keyFor(trigger)
+        if (key.isEmpty()) return true
+        val json = try {
+            studioPrefs.getString("meta_$key", null)
+        } catch (_: Exception) {
+            null
+        } ?: return true
+        return CommandMeta.fromJson(json)?.enabled ?: true
+    }
+
+    private fun isTriggerBoundary(text: String, triggerStart: Int, prefix: String): Boolean {
+        if (triggerStart < 0) return false
+        if (triggerStart == 0) return true
+        return prefix.isEmpty() || text[triggerStart - 1] != prefix[0]
+    }
+
     fun findCommand(text: String): Command? {
+        if (text.isEmpty()) return null
+        val prefix = getTriggerPrefix()
         val commands = getCommands()
         for (cmd in commands) {  // Already sorted by trigger length in getCommands()
-            if (text.endsWith(cmd.trigger)) {
-                return cmd
-            }
+            if (cmd.trigger.isEmpty() || !text.endsWith(cmd.trigger)) continue
+            val startIdx = text.length - cmd.trigger.length
+            if (!isTriggerBoundary(text, startIdx, prefix)) continue
+            if (!isTriggerEnabled(cmd.trigger)) continue
+            return cmd
         }
-        val prefix = getTriggerPrefix()
         // Translate trigger — intentionally accepts any 2-5 char alphanumeric language code
-        // (e.g. "en", "fr", "zh", "pt-BR" without hyphen). Open-ended to support ISO 639 codes
-        // without maintaining a hardcoded list. The AI model handles invalid codes gracefully.
+        // containing at least one ASCII letter (e.g. "en", "fr", "zh", "ptBR"), rejecting
+        // digit-only codes like "123".
         val translatePrefix = "${prefix}translate:"
         val translateIdx = text.lastIndexOf(translatePrefix)
-        if (translateIdx >= 0) {
+        if (translateIdx >= 0 && isTriggerBoundary(text, translateIdx, prefix)) {
             val langPart = text.substring(translateIdx + translatePrefix.length)
-            if (langPart.length in 2..5 && langPart.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }) {
-                return Command("${translatePrefix}$langPart", "Translate to language code '$langPart'.", true)
+            if (langPart.length in 2..5 &&
+                langPart.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } &&
+                langPart.any { it in 'a'..'z' || it in 'A'..'Z' }
+            ) {
+                val trigger = "${translatePrefix}$langPart"
+                if (isTriggerEnabled(trigger)) {
+                    return Command(trigger, "Translate to language code '$langPart'.", true)
+                }
             }
         }
         return null

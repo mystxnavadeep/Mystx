@@ -20,6 +20,7 @@ import com.mystx.app.model.RichCommand
 import com.mystx.app.service.CommandOutcome
 import com.mystx.app.service.runTextCommand
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +50,8 @@ sealed interface UiState {
  */
 class ProcessTextViewModel(
     app: Application,
-    private val selection: Selection
+    private val selection: Selection,
+    private val callingPackage: String? = null
 ) : AndroidViewModel(app) {
 
     private companion object {
@@ -91,9 +93,12 @@ class ProcessTextViewModel(
                     // accessibility service has and this flow does not. Filtered on isBuiltIn, not
                     // on trigger text: the prefix is user-configurable, so matching "?copy" would
                     // silently stop filtering the moment someone changed it.
+                    // Also filter out commands that depend on screen context ({screen_text} / ?reply)
+                    // since ProcessText has no accessibility screen tree.
                     commandStudioStore.getRichCommands()
                         .filter { it.enabled }
                         .filterNot { it.isBuiltIn && (it.trigger.endsWith("undo") || it.trigger.endsWith("copy") || it.trigger.endsWith("cut") || it.trigger.endsWith("paste") || it.trigger.endsWith("replace")) }
+                        .filterNot { it.promptTemplate.contains("{screen_text}") || it.trigger.endsWith("reply") }
                         .map { Command(it.trigger, it.promptTemplate, it.isBuiltIn, it.type) }
                 }
             } catch (e: Exception) {
@@ -110,35 +115,44 @@ class ProcessTextViewModel(
     fun run(command: Command) {
         if (!inFlight.compareAndSet(false, true)) return
 
-        val richCommand = commandStudioStore.getRichForCommand(command)
-
-        // A snippet needs no request at all — resolve it without touching the network.
-        if (richCommand.type == CommandType.TEXT_REPLACER) {
-            inFlight.set(false)
-            _uiState.value = UiState.Preview(richCommand.promptTemplate, canInsert = !selection.readOnly)
-            viewModelScope.launch {
-                try { withContext(Dispatchers.IO) { statsManager.recordUsage(richCommand.trigger) } }
-                catch (e: Exception) { Log.w(TAG, "recording usage failed", e) }
-            }
-            return
-        }
-
-        _uiState.value = UiState.Loading(command)
         viewModelScope.launch {
-            _uiState.value = try {
-                val context = PromptPlaceholders.Context(
-                    text = selection.text,
-                    language = PromptPlaceholders.languageFromTrigger(richCommand.trigger)
-                )
-                val finalPrompt = PromptPlaceholders.render(richCommand.promptTemplate, context)
+            try {
+                val richCommand = withContext(Dispatchers.IO) {
+                    commandStudioStore.getRichForCommand(command)
+                }
 
-                val cached = HistoryManager.findCachedResponse(getApplication(), selection.text, richCommand.trigger)
-                if (cached != null) {
-                    _uiState.value = UiState.Preview(cached, canInsert = !selection.readOnly)
-                    inFlight.set(false)
+                // A snippet needs no request at all — resolve it without touching the network.
+                if (richCommand.type == CommandType.TEXT_REPLACER) {
+                    _uiState.value = UiState.Preview(richCommand.promptTemplate, canInsert = !selection.readOnly)
+                    try {
+                        withContext(Dispatchers.IO) { statsManager.recordUsage(richCommand.trigger) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "recording usage failed", e)
+                    }
                     return@launch
                 }
 
+                _uiState.value = UiState.Loading(command)
+
+                val context = PromptPlaceholders.Context(
+                    text = selection.text,
+                    language = PromptPlaceholders.languageFromTrigger(richCommand.trigger),
+                    app = callingPackage
+                )
+                val finalPrompt = PromptPlaceholders.render(richCommand.promptTemplate, context)
+
+                val cached = withContext(Dispatchers.IO) {
+                    HistoryManager.findCachedResponse(getApplication(), selection.text, richCommand.trigger)
+                }
+                if (cached != null) {
+                    try {
+                        withContext(Dispatchers.IO) { statsManager.recordUsage(richCommand.trigger) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "recording usage failed", e)
+                    }
+                    _uiState.value = UiState.Preview(cached, canInsert = !selection.readOnly)
+                    return@launch
+                }
 
                 // On IO: KeyManager is Keystore-backed and prefs are disk-backed, both read on
                 // whatever dispatcher calls them (the HTTP clients switch to IO themselves).
@@ -152,7 +166,7 @@ class ProcessTextViewModel(
                         )
                     }
                 }
-                when (outcome) {
+                _uiState.value = when (outcome) {
                     is CommandOutcome.Success -> {
                         try { withContext(Dispatchers.IO) { statsManager.recordUsage(richCommand.trigger) } }
                         catch (e: Exception) { Log.w(TAG, "recording usage failed", e) }
@@ -166,12 +180,14 @@ class ProcessTextViewModel(
                     is CommandOutcome.Failure -> UiState.Error(outcome.message, retry = command)
                 }
             } catch (_: TimeoutCancellationException) {
-                UiState.Error(string(R.string.toast_request_timed_out), retry = command)
+                _uiState.value = UiState.Error(string(R.string.toast_request_timed_out), retry = command)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Same-process safety net — never let an unexpected failure take the service
                 // down with this activity (#125).
                 Log.w(TAG, "running command failed unexpectedly", e)
-                UiState.Error(string(R.string.error_bad_request), retry = command)
+                _uiState.value = UiState.Error(string(R.string.error_bad_request), retry = command)
             } finally {
                 inFlight.set(false)
             }

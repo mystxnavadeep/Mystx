@@ -1,7 +1,5 @@
 package com.mystx.app.model
 
-import java.util.Locale
-
 /**
  * Placeholder resolution for Command Studio prompt templates.
  *
@@ -11,8 +9,10 @@ import java.util.Locale
  *   {tone}        requested tone, if available
  *   {instruction} additional command instruction, if available
  *   {app}         application / package context, if available
+ *   {screen_text} captured screen context, if available
  *
  * Safe handling:
+ *   - Single-pass regex replacement ensures user text is never re-scanned for placeholders.
  *   - Known tokens without available values are replaced with empty string.
  *   - Unknown tokens remain unchanged.
  *   - Legacy templates without tokens remain unchanged.
@@ -28,6 +28,8 @@ object PromptPlaceholders {
 
     val ALL = listOf(TEXT, LANGUAGE, TONE, INSTRUCTION, APP, SCREEN_TEXT)
 
+    private val PLACEHOLDER_REGEX = Regex("\\{(text|language|tone|instruction|app|screen_text)\\}")
+
     data class Context(
         val text: String,
         val language: String? = null,
@@ -41,13 +43,17 @@ object PromptPlaceholders {
 
     fun render(template: String, context: Context): String {
         if (!template.contains('{')) return template
-        var out = template
-            .replace(token(TEXT), context.text)
-            .replace(token(LANGUAGE), context.language ?: "")
-            .replace(token(TONE), context.tone ?: "")
-            .replace(token(INSTRUCTION), context.instruction ?: "")
-            .replace(token(APP), context.app ?: "")
-            .replace(token(SCREEN_TEXT), context.screenText ?: "")
+        var out = PLACEHOLDER_REGEX.replace(template) { match ->
+            when (match.groupValues[1]) {
+                TEXT -> context.text
+                LANGUAGE -> context.language ?: ""
+                TONE -> context.tone ?: ""
+                INSTRUCTION -> context.instruction ?: ""
+                APP -> context.app ?: ""
+                SCREEN_TEXT -> context.screenText ?: ""
+                else -> match.value
+            }
+        }
         out = out.replace(Regex("[ \\t]*\\n[ \\t]*\\n[ \\t]*\\n+"), "\n\n").trim()
         return out
     }

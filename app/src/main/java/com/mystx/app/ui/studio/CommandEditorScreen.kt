@@ -1,6 +1,5 @@
 package com.mystx.app.ui.studio
 
-import android.content.Context
 import android.content.SharedPreferences
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -13,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -21,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -31,6 +30,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mystx.app.R
+import com.mystx.app.api.ApiClientUtils
 import com.mystx.app.api.GeminiClient
 import com.mystx.app.api.OpenAICompatibleClient
 import com.mystx.app.manager.CommandManager
@@ -80,6 +80,7 @@ fun CommandEditorScreen(
     var trigger by rememberSaveable { mutableStateOf(initialCommand?.trigger ?: prefix) }
     var category by rememberSaveable { mutableStateOf(initialCommand?.category ?: CommandCategory.CUSTOM) }
     var categoryExpanded by remember { mutableStateOf(false) }
+    var commandType by rememberSaveable { mutableStateOf(initialCommand?.type ?: CommandType.AI) }
 
     var modelOverride by rememberSaveable { mutableStateOf(initialCommand?.modelOverride ?: "") }
     var modelExpanded by remember { mutableStateOf(false) }
@@ -95,7 +96,9 @@ fun CommandEditorScreen(
     var useCustomTemp by rememberSaveable { mutableStateOf(initialCommand?.temperature != null) }
 
     val initialPrompt = initialCommand?.promptTemplate ?: "Rewrite the following text:\n\n{text}"
-    var promptFieldValue by remember { mutableStateOf(TextFieldValue(initialPrompt)) }
+    var promptFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(initialPrompt))
+    }
 
     var enabled by rememberSaveable { mutableStateOf(initialCommand?.enabled ?: true) }
 
@@ -103,6 +106,7 @@ fun CommandEditorScreen(
     var nameError by remember { mutableStateOf<String?>(null) }
     var triggerError by remember { mutableStateOf<String?>(null) }
     var promptError by remember { mutableStateOf<String?>(null) }
+    var saveError by remember { mutableStateOf<String?>(null) }
 
     // Dialog state
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -162,7 +166,7 @@ fun CommandEditorScreen(
             }
         }
 
-        // Card 1: Command Basics (Name, Trigger, Category, Enabled)
+        // Card 1: Command Basics (Name, Trigger, Type, Category, Enabled)
         MystCard {
             // Command Name
             Text(
@@ -176,6 +180,7 @@ fun CommandEditorScreen(
                 onValueChange = {
                     name = it
                     nameError = null
+                    saveError = null
                 },
                 placeholder = { Text(stringResource(R.string.command_studio_name_hint)) },
                 isError = nameError != null
@@ -198,6 +203,7 @@ fun CommandEditorScreen(
                 onValueChange = { input ->
                     val clean = input.take(CommandManager.MAX_TRIGGER_LENGTH)
                     trigger = clean
+                    saveError = null
                     triggerError = when {
                         clean.isBlank() -> errorTriggerEmpty
                         !clean.startsWith(prefix) -> errorTriggerPrefix
@@ -212,6 +218,57 @@ fun CommandEditorScreen(
             )
             triggerError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+
+            if (!isBuiltIn) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Command Type",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val types = listOf(
+                        CommandType.AI to stringResource(R.string.commands_type_ai),
+                        CommandType.TEXT_REPLACER to stringResource(R.string.commands_type_replacer)
+                    )
+                    types.forEach { (typeOption, label) ->
+                        val selected = commandType == typeOption
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(
+                                    if (selected) mystGradient()
+                                    else SolidColor(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+                                .border(
+                                    width = 0.5.dp,
+                                    color = if (selected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(999.dp)
+                                )
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    commandType = typeOption
+                                    promptError = null
+                                    saveError = null
+                                }
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -354,8 +411,28 @@ fun CommandEditorScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                if (useCustomTemp) {
+                    Text(
+                        text = "Reset to Global",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clickable(interactionSource = null, indication = null) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                useCustomTemp = false
+                                temperature = globalTemp
+                            }
+                            .padding(end = 10.dp)
+                    )
+                }
+                val tempLabel = if (useCustomTemp) {
+                    String.format(java.util.Locale.US, "%.1f", temperature)
+                } else {
+                    String.format(java.util.Locale.US, "%.1f (Global)", globalTemp)
+                }
                 Text(
-                    text = String.format(java.util.Locale.US, "%.1f", temperature),
+                    text = tempLabel,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
@@ -363,10 +440,10 @@ fun CommandEditorScreen(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Slider(
-                value = temperature,
+                value = if (useCustomTemp) temperature else globalTemp,
                 onValueChange = {
                     val newVal = Math.round(it * 10) / 10f
-                    if (newVal != temperature) {
+                    if (!useCustomTemp || newVal != temperature) {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         temperature = newVal
                         useCustomTemp = true
@@ -388,7 +465,11 @@ fun CommandEditorScreen(
         // Card 3: Prompt Template & Placeholders
         MystCard {
             Text(
-                text = stringResource(R.string.command_studio_prompt_label),
+                text = if (commandType == CommandType.TEXT_REPLACER) {
+                    stringResource(R.string.commands_replacement_label)
+                } else {
+                    stringResource(R.string.command_studio_prompt_label)
+                },
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -422,13 +503,17 @@ fun CommandEditorScreen(
                                 val token = "{$placeholder}"
                                 val sel = promptFieldValue.selection
                                 val text = promptFieldValue.text
-                                val newText = text.replaceRange(sel.start, sel.end, token)
-                                val newCursor = sel.start + token.length
+                                val start = sel.min.coerceIn(0, text.length)
+                                val end = sel.max.coerceIn(start, text.length)
+                                val newText = text.replaceRange(start, end, token)
+                                    .take(CommandManager.MAX_PROMPT_LENGTH)
+                                val newCursor = (start + token.length).coerceAtMost(newText.length)
                                 promptFieldValue = TextFieldValue(
                                     text = newText,
                                     selection = TextRange(newCursor)
                                 )
                                 promptError = null
+                                saveError = null
                             }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
@@ -447,8 +532,21 @@ fun CommandEditorScreen(
             OutlinedTextField(
                 value = promptFieldValue,
                 onValueChange = {
-                    promptFieldValue = it.copy(text = it.text.take(CommandManager.MAX_PROMPT_LENGTH))
+                    val truncated = it.text.take(CommandManager.MAX_PROMPT_LENGTH)
+                    val maxLen = truncated.length
+                    promptFieldValue = if (truncated.length == it.text.length) {
+                        it
+                    } else {
+                        it.copy(
+                            text = truncated,
+                            selection = TextRange(
+                                it.selection.start.coerceAtMost(maxLen),
+                                it.selection.end.coerceAtMost(maxLen)
+                            )
+                        )
+                    }
                     promptError = null
+                    saveError = null
                 },
                 placeholder = { Text(stringResource(R.string.command_studio_prompt_hint)) },
                 shape = MystCompactShape,
@@ -550,7 +648,7 @@ fun CommandEditorScreen(
                                 prompt = renderedPreview,
                                 text = sampleText,
                                 modelOverride = modelOverride.ifBlank { null },
-                                temperatureOverride = temperature
+                                temperatureOverride = if (useCustomTemp) temperature else null
                             )
                         }
                         isTesting = false
@@ -564,11 +662,11 @@ fun CommandEditorScreen(
                                 testResultIsError = true
                             }
                             is CommandOutcome.Unavailable -> {
-                                testResultText = outcome.message
+                                testResultText = ApiClientUtils.redactSecrets(outcome.message)
                                 testResultIsError = true
                             }
                             is CommandOutcome.Failure -> {
-                                testResultText = outcome.message
+                                testResultText = ApiClientUtils.redactSecrets(outcome.message)
                                 testResultIsError = true
                             }
                         }
@@ -609,6 +707,15 @@ fun CommandEditorScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        saveError?.let { msg ->
+            Text(
+                text = msg,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
         // Action Buttons: Save, Delete, Reset
         val promptText = promptFieldValue.text.trim()
         MystGradientButton(
@@ -616,6 +723,7 @@ fun CommandEditorScreen(
             onClick = {
                 // Validation
                 var hasError = false
+                saveError = null
                 val trimmedName = name.trim()
                 val trimmedTrigger = trigger.trim()
 
@@ -640,7 +748,7 @@ fun CommandEditorScreen(
                 if (promptText.isBlank()) {
                     promptError = errorPromptEmpty
                     hasError = true
-                } else if (PromptPlaceholders.requiresText(promptText)) {
+                } else if (commandType == CommandType.AI && PromptPlaceholders.requiresText(promptText)) {
                     promptError = errorMissingText
                     hasError = true
                 }
@@ -676,12 +784,14 @@ fun CommandEditorScreen(
                         temperature = tempVal,
                         enabled = enabled,
                         isBuiltIn = false,
-                        type = initialCommand?.type ?: CommandType.AI
+                        type = commandType
                     )
                     val initialTrig = initialCommand?.trigger ?: trimmedTrigger
                     val ok = store.saveCustom(commandToSave, replacing = initialTrig)
                     if (ok != null) {
                         onBack()
+                    } else {
+                        saveError = "Could not save command. Check that the trigger doesn't conflict with another command and all fields are valid."
                     }
                 }
             },

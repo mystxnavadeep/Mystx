@@ -23,18 +23,31 @@ class UpdateCheckWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
+    private sealed class FetchResult {
+        data class Success(val release: JSONObject) : FetchResult()
+        object Retry : FetchResult()
+        object Skip : FetchResult()
+    }
+
     companion object {
         const val CHANNEL_ID = "update_channel"
         private const val NOTIFICATION_ID = 9001
         private const val MAX_RESPONSE_CHARS = 1_048_576
         private const val PREFS_NAME = "update_check"
         private const val KEY_LAST_NOTIFIED_VERSION = "last_notified_version"
-        // TODO: point these at the Mystx project's real GitHub repository once it exists —
-        // until then the API answers 404, doWork() retries quietly, and no notification fires.
+        private val SEMVER_REGEX = Regex("^v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?")
         private const val GITHUB_API_URL =
             "https://api.github.com/repos/mystxnavadeep/Mystx/releases/latest"
         private const val RELEASES_URL =
             "https://github.com/mystxnavadeep/Mystx/releases/latest"
+
+        private fun parseVersion(version: String): Triple<Int, Int, Int>? {
+            val match = SEMVER_REGEX.find(version.trim()) ?: return null
+            val major = match.groupValues[1].toIntOrNull() ?: return null
+            val minor = match.groupValues[2].toIntOrNull() ?: return null
+            val patch = match.groupValues[3].toIntOrNull() ?: 0
+            return Triple(major, minor, patch)
+        }
 
         /**
          * Compares dot-separated versions (e.g. "1.0.50" > "1.0.49").
@@ -45,30 +58,33 @@ class UpdateCheckWorker(
          * every run or silently never notifies.
          */
         internal fun isNewer(latest: String, current: String): Boolean {
-            val latestParts = latest.split(".").mapNotNull { it.toIntOrNull() }
-            val currentParts = current.split(".").mapNotNull { it.toIntOrNull() }
-            val maxLen = maxOf(latestParts.size, currentParts.size)
-            for (i in 0 until maxLen) {
-                val l = latestParts.getOrElse(i) { 0 }
-                val c = currentParts.getOrElse(i) { 0 }
-                if (l > c) return true
-                if (l < c) return false
-            }
-            return false
+            val l = parseVersion(latest) ?: return false
+            val c = parseVersion(current) ?: return false
+            if (l.first != c.first) return l.first > c.first
+            if (l.second != c.second) return l.second > c.second
+            return l.third > c.third
         }
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ENABLE_UPDATER || BuildConfig.VERSION_NAME.contains("-preview")) {
+            return@withContext Result.success()
+        }
         try {
-            val release = fetchLatestRelease() ?: return@withContext Result.retry()
+            val release = when (val result = fetchLatestRelease()) {
+                is FetchResult.Success -> result.release
+                is FetchResult.Retry -> return@withContext Result.retry()
+                is FetchResult.Skip -> return@withContext Result.success()
+            }
             val latestTag = release.optString("tag_name", "").removePrefix("v")
             val currentVersion = BuildConfig.VERSION_NAME.removePrefix("v")
 
             if (latestTag.isBlank() || currentVersion.isBlank()) return@withContext Result.success()
 
             if (isNewer(latestTag, currentVersion) && !alreadyNotified(latestTag)) {
-                showNotification()
-                markNotified(latestTag)
+                if (showNotification()) {
+                    markNotified(latestTag)
+                }
             }
 
             Result.success()
@@ -79,16 +95,20 @@ class UpdateCheckWorker(
         }
     }
 
-    private fun fetchLatestRelease(): JSONObject? {
+    private fun fetchLatestRelease(): FetchResult {
         val url = URL(GITHUB_API_URL)
         val connection = url.openConnection() as HttpURLConnection
         return try {
             connection.requestMethod = "GET"
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Accept", "application/vnd.github+json")
+            connection.setRequestProperty("User-Agent", "Mystx-App")
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000
 
-            if (connection.responseCode != 200) return null
+            val code = connection.responseCode
+            if (code in 500..599) return FetchResult.Retry
+            if (code != 200) return FetchResult.Skip
 
             // Bounded read — avoids unbounded memory usage on unexpectedly large responses
             val body = connection.inputStream.bufferedReader().use { reader ->
@@ -96,12 +116,12 @@ class UpdateCheckWorker(
                 val buf = CharArray(8192)
                 var n: Int
                 while (reader.read(buf).also { n = it } != -1) {
-                    if (sb.length + n > MAX_RESPONSE_CHARS) return null
+                    if (sb.length + n > MAX_RESPONSE_CHARS) return FetchResult.Skip
                     sb.append(buf, 0, n)
                 }
                 sb.toString()
             }
-            JSONObject(body)
+            FetchResult.Success(JSONObject(body))
         } finally {
             connection.disconnect()
         }
@@ -123,9 +143,13 @@ class UpdateCheckWorker(
         prefs.edit().putString(KEY_LAST_NOTIFIED_VERSION, version).apply()
     }
 
-    private fun showNotification() {
+    private fun showNotification(): Boolean {
         val notificationManager =
             applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !notificationManager.areNotificationsEnabled()) {
+            return false
+        }
 
         // Create channel for Android 8+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -157,5 +181,6 @@ class UpdateCheckWorker(
             .build()
 
         notificationManager.notify(NOTIFICATION_ID, notification)
+        return true
     }
 }

@@ -116,6 +116,7 @@ class PdfViewModel(
     }
 
     fun validated() {
+        encryptedDocumentPassword = ""
         _passwordStatus.value = PasswordStatus.Validated
         dismissPasswordPrompt()
     }

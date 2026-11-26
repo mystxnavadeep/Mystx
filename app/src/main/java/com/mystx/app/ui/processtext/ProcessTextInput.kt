@@ -15,6 +15,8 @@ class RejectedSelectionException(val rejection: Rejection) : Exception()
  */
 object ProcessTextInput {
 
+    const val MAX_SELECTION_LENGTH = 16_000
+
     // Invisible characters as \u escapes so none sit literally (as raw bytes) in this file.
     private const val BOM = '\uFEFF' // zero-width no-break space; some hosts prepend it
     private const val ZERO_WIDTH_SPACE = '\u200B'
@@ -37,21 +39,19 @@ object ProcessTextInput {
         // Flatten once: EXTRA_PROCESS_TEXT frequently arrives as a Spanned, and carrying
         // host-specific span classes into equality checks or the model prompt helps nobody.
         var s = rawText.toString()
-        s = s.removePrefix(BOM.toString())
         // Normalize line endings so payloads are consistent across hosts and the model does
         // not appear to have "changed" text merely by echoing \n back.
         s = s.replace("\r\n", "\n").replace('\r', '\n')
+        // Strip leading and trailing BOM & zero-width invisible characters before checking
+        // blankness, while preserving meaningful interior formatting and indentation.
+        s = s.trim { isInvisible(it) }
 
-        // Blankness is tested on the trimmed form, but the untrimmed text is what gets sent:
-        // interior newlines and indentation are meaningful content (paragraphs, code blocks),
-        // and the accessibility path does not collapse them either.
         if (s.trim().all { it.isWhitespace() || isInvisible(it) }) return reject(Rejection.Missing)
 
-        // No client-side length cap: the accessibility (typed-trigger) path already sends
-        // whatever the field contains uncapped, and the provider itself enforces the real
-        // limit (its context/token window) and returns a proper error -- see
-        // ErrorMessages.map()'s "request too large" / "context_length_exceeded" handling,
-        // which both entry points already rely on for an over-length request.
+        if (s.length > MAX_SELECTION_LENGTH) {
+            s = s.take(MAX_SELECTION_LENGTH)
+        }
+
         return Result.success(Selection(text = s, readOnly = readOnlyExtra ?: true))
     }
 

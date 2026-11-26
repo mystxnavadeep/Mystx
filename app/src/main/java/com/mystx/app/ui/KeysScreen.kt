@@ -9,16 +9,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -35,15 +36,13 @@ import com.mystx.app.model.PrefKeys
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.BaiConfig
 import com.mystx.app.provider.GroqConfig
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import com.mystx.app.ui.components.MystEmptyState
-import com.mystx.app.ui.components.MystDialog
-import com.mystx.app.ui.components.MystGradientButton
-import com.mystx.app.ui.components.ScreenTitle
 import com.mystx.app.ui.components.MystCard
+import com.mystx.app.ui.components.MystDialog
+import com.mystx.app.ui.components.MystEmptyState
+import com.mystx.app.ui.components.MystGradientButton
 import com.mystx.app.ui.components.MystItemCard
 import com.mystx.app.ui.components.MystTextField
+import com.mystx.app.ui.components.ScreenTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +68,7 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
     // during composition. Loaded in the LaunchedEffect below instead.
     var keys by remember { mutableStateOf<List<String>>(emptyList()) }
     var keyToDelete by remember { mutableStateOf<String?>(null) }
-    var newKey by rememberSaveable { mutableStateOf("") }
+    var newKey by remember { mutableStateOf("") }
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var testSuccess by remember { mutableStateOf(false) }
@@ -211,7 +210,12 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 13.sp,
                     modifier = Modifier
-                        .clickable(interactionSource = null, indication = null) { uriHandler.openUri(apiKeyUrl) }
+                        .clickable(interactionSource = null, indication = null) {
+                            try {
+                                uriHandler.openUri(apiKeyUrl)
+                            } catch (_: Exception) {
+                            }
+                        }
                         .padding(top = 8.dp)
                 )
             }

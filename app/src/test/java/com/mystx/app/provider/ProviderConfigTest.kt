@@ -118,10 +118,10 @@ class ProviderConfigTest {
         assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://192.168.1.5:8080/v1"))
         assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://172.16.0.1:8080/v1"))
         assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://172.31.255.254:8080/v1"))
-        assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://169.254.0.1:8080/v1"))
-        assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://100.64.0.1:8080/v1"))
-        assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://100.127.255.254:8080/v1"))
-        assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://my-nas.local:8080/v1"))
+        assertEquals(EndpointValidator.Error.INVALID, EndpointValidator.validate("http://169.254.0.1:8080/v1"))
+        assertEquals(EndpointValidator.Error.INVALID, EndpointValidator.validate("http://100.64.0.1:8080/v1"))
+        assertEquals(EndpointValidator.Error.INVALID, EndpointValidator.validate("http://100.127.255.254:8080/v1"))
+        assertEquals(EndpointValidator.Error.INVALID, EndpointValidator.validate("http://my-nas.local:8080/v1"))
         assertEquals(EndpointValidator.Error.NONE, EndpointValidator.validate("http://[::1]:8080/v1"))
     }
 

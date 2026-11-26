@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
@@ -90,13 +91,14 @@ class ProcessTextActivity : ComponentActivity() {
         } else {
             null
         }
+        val callerPkg = callingPackage
 
         setContent {
             MystxTheme(forceLight = true) {
                 ProcessTextRoot(
                     selection = selection,
                     rejectionMessage = rejectionMessage,
-                    factory = { app, sel -> viewModelFactory { initializer { ProcessTextViewModel(app, sel) } } },
+                    factory = { app, sel -> viewModelFactory { initializer { ProcessTextViewModel(app, sel, callerPkg) } } },
                     application = application,
                     onInsert = { original, text -> replaceAndFinish(original, text) },
                     onCopy = { text -> copyToClipboard(text) },
@@ -113,21 +115,15 @@ class ProcessTextActivity : ComponentActivity() {
     private fun replaceAndFinish(original: String, replacement: String) {
         if (resultDelivered) return
         resultDelivered = true
-
-        if (intent?.getBooleanExtra("from_assistant", false) == true) {
-            val replaceIntent = Intent("com.mystx.app.ACTION_REPLACE_TEXT")
-            replaceIntent.putExtra("replacement", replacement)
-            sendBroadcast(replaceIntent)
-            finish()
-            return
+        val caller = callingPackage
+        if (caller != null && intent?.action == Intent.ACTION_PROCESS_TEXT) {
+            ProcessTextReplacementBridge.prepare(
+                original = original,
+                replacement = replacement,
+                sourcePackage = caller,
+                now = SystemClock.elapsedRealtime()
+            )
         }
-
-        ProcessTextReplacementBridge.prepare(
-            original = original,
-            replacement = replacement,
-            sourcePackage = callingPackage,
-            now = SystemClock.elapsedRealtime()
-        )
         setResult(
             RESULT_OK,
             Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, replacement)
@@ -160,11 +156,18 @@ private fun ProcessTextRoot(
 ) {
     val copiedMessage = stringResource(R.string.process_text_copied)
     var confirmation by remember { mutableStateOf<String?>(null) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
     LaunchedEffect(confirmation) {
         if (confirmation != null) {
             delay(CONFIRMATION_VISIBLE_MS)
-            onFinish()
+            // Trigger MystBottomSheet's BackHandler close animation callback instead of
+            // calling finish() abruptly so the sheet animates out cleanly.
+            if (backDispatcher != null) {
+                backDispatcher.onBackPressed()
+            } else {
+                onFinish()
+            }
         }
     }
 

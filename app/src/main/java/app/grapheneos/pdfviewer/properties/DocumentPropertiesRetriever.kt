@@ -65,25 +65,33 @@ class DocumentPropertiesRetriever(
             OpenableColumns.SIZE
         )
 
-        context.contentResolver.query(
-            uri,
-            proj,
-            null,
-            null
-        )?.use { cursor ->
-            cursor.moveToFirst()
-            val indexName: Int = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        try {
+            context.contentResolver.query(
+                uri,
+                proj,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val indexName: Int = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (indexName >= 0) {
+                        val name = cursor.getString(indexName)
+                        if (!name.isNullOrEmpty()) {
+                            collections[DocumentProperty.FileName] = name
+                        }
+                    }
 
-            if (indexName >= 0) {
-                collections[DocumentProperty.FileName] = cursor.getString(indexName)
+                    val indexSize: Int = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (indexSize >= 0) {
+                        val fileSize = cursor.getLongOrNull(indexSize)
+                        collections[DocumentProperty.FileSize] =
+                            fileSize?.let { Formatter.formatFileSize(context, it) }
+                                ?: context.getString(R.string.unknown_file_size)
+                    }
+                }
             }
-
-            val indexSize: Int = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (indexSize >= 0) {
-                val fileSize = cursor.getLongOrNull(indexSize)
-                collections[DocumentProperty.FileSize] =
-                    fileSize?.let { Formatter.formatFileSize(context, it) } ?: context.getString(R.string.unknown_file_size)
-            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query file properties", e)
         }
         return collections
     }

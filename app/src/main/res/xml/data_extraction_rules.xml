@@ -1,15 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="file" path="history.json" />
         <exclude domain="sharedpref" path="secure_keys_prefs.xml" />
         <exclude domain="sharedpref" path="settings.xml" />
         <exclude domain="sharedpref" path="commands.xml" />
+        <exclude domain="sharedpref" path="command_studio.xml" />
         <exclude domain="sharedpref" path="stats.xml" />
+        <exclude domain="sharedpref" path="update_check.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="file" path="history.json" />
         <exclude domain="sharedpref" path="secure_keys_prefs.xml" />
         <exclude domain="sharedpref" path="settings.xml" />
         <exclude domain="sharedpref" path="commands.xml" />
+        <exclude domain="sharedpref" path="command_studio.xml" />
         <exclude domain="sharedpref" path="stats.xml" />
+        <exclude domain="sharedpref" path="update_check.xml" />
     </device-transfer>
 </data-extraction-rules>

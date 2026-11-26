@@ -2,6 +2,7 @@ package com.mystx.app.manager
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -9,11 +10,12 @@ class KeyManager internal constructor(
     context: Context,
     private val cipher: KeyCipher
 ) {
-    constructor(context: Context) : this(context, AndroidKeystoreCipher())
+    internal constructor(context: Context) : this(context, AndroidKeystoreCipher())
 
     private val prefs: SharedPreferences = context.getSharedPreferences("secure_keys_prefs", Context.MODE_PRIVATE)
 
     companion object {
+        private const val TAG = "KeyManager"
         private const val PREF_KEY_ARRAY = "keys_array"
         private const val CACHE_TTL_MS = 5_000L
         private const val MAX_KEY_LENGTH = 256
@@ -86,10 +88,7 @@ class KeyManager internal constructor(
                 try { JSONArray(stored).toStringList() } catch (_: Exception) { emptyList() }
             }
         }
-        val jsonStr = cipher.decrypt(stored) ?: run {
-            cacheKeys(emptyList(), stored)
-            return emptyList()
-        }
+        val jsonStr = cipher.decrypt(stored) ?: return emptyList()
         val list = try { JSONArray(jsonStr).toStringList() } catch (_: Exception) { emptyList() }
         cacheKeys(list, stored)
         return list
@@ -122,6 +121,11 @@ class KeyManager internal constructor(
     fun addKey(key: String): Boolean {
         val trimmedKey = key.trim()
         if (trimmedKey.isBlank() || trimmedKey.length > MAX_KEY_LENGTH) return false
+        val stored = prefs.getString(PREF_KEY_ARRAY, null)
+        if (!stored.isNullOrEmpty() && !isLegacyPlaintext(stored) && cipher.decrypt(stored) == null) {
+            Log.e(TAG, "Refusing to overwrite undecryptable key store")
+            return false
+        }
         val keys = getKeys().toMutableList()
         if (!keys.contains(trimmedKey)) {
             keys.add(trimmedKey)
@@ -172,12 +176,13 @@ class KeyManager internal constructor(
     }
 
     fun reportRateLimit(key: String, retryAfterSeconds: Long = 60) {
+        val trimmedKey = key.trim()
         val cooldown = retryAfterSeconds.coerceIn(1, 600)
-        rateLimitedKeys[key] = System.currentTimeMillis() + cooldown * 1_000
+        rateLimitedKeys[trimmedKey] = System.currentTimeMillis() + cooldown * 1_000
     }
 
     fun markInvalid(key: String) {
-        invalidKeys[key] = System.currentTimeMillis() + INVALID_KEY_TTL_MS
+        invalidKeys[key.trim()] = System.currentTimeMillis() + INVALID_KEY_TTL_MS
     }
 
     /**

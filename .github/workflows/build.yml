@@ -244,20 +244,20 @@ jobs:
       - name: Decode signing keystore
         shell: bash
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > ${{ github.workspace }}/release.keystore
-          chmod 600 ${{ github.workspace }}/release.keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/release.keystore"
+          chmod 600 "${RUNNER_TEMP}/release.keystore"
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
-      - name: Build Release APK
+      - name: Build Release APK & AAB
         shell: bash
         run: |
           result=1
           for i in 1 2 3; do
-            ./gradlew assembleRelease --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
+            ./gradlew assembleRelease bundleRelease --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
               -PversionCode="$VERSION_CODE" \
               -PversionName="$VERSION_NAME" && { result=0; break; }
-            echo "::warning::APK Build attempt $i failed, retrying..."
+            echo "::warning::Build attempt $i failed, retrying..."
             sleep 15
           done
           exit $result
@@ -266,27 +266,7 @@ jobs:
           # before bash sees it, so a value containing shell metacharacters would be executed.
           VERSION_CODE: ${{ needs.version.outputs.version_code }}
           VERSION_NAME: ${{ needs.version.outputs.version_name }}
-          KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Build Play Store AAB
-        shell: bash
-        run: |
-          result=1
-          for i in 1 2 3; do
-            ./gradlew bundleRelease -PplayStore --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
-              -PversionCode="$VERSION_CODE" \
-              -PversionName="$VERSION_NAME" && { result=0; break; }
-            echo "::warning::AAB Build attempt $i failed, retrying..."
-            sleep 15
-          done
-          exit $result
-        env:
-          VERSION_CODE: ${{ needs.version.outputs.version_code }}
-          VERSION_NAME: ${{ needs.version.outputs.version_name }}
-          KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -294,7 +274,7 @@ jobs:
       - name: Cleanup keystore
         if: always()
         shell: bash
-        run: rm -f ${{ github.workspace }}/release.keystore
+        run: rm -f "${RUNNER_TEMP}/release.keystore"
 
       - name: Verify APK and log size
         shell: bash
@@ -477,6 +457,8 @@ jobs:
           files: |
             artifacts/**/Mystx-*.apk
             artifacts/**/Mystx-*.aab
+            artifacts/Mystx-*.apk
+            artifacts/Mystx-*.aab
             artifacts/versionCode.txt
           name: Mystx ${{ needs.version.outputs.tag }}
           body_path: /tmp/changelog.md

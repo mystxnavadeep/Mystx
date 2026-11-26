@@ -1,19 +1,23 @@
 package com.mystx.app.ui
 
 import android.content.SharedPreferences
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -25,12 +29,8 @@ import androidx.compose.ui.unit.sp
 import com.mystx.app.BuildConfig
 import com.mystx.app.R
 import com.mystx.app.api.ApiClientUtils
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import com.mystx.app.manager.CommandManager
+import com.mystx.app.manager.CommandStudioStore
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.BaiModels
 import com.mystx.app.model.GeminiModels
@@ -42,28 +42,26 @@ import com.mystx.app.provider.EndpointValidator
 import com.mystx.app.provider.GeminiConfig
 import com.mystx.app.provider.GroqConfig
 import com.mystx.app.service.discovery.ModelDiscoveryService
-import androidx.compose.foundation.border
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.activity.compose.BackHandler
+import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystDialog
+import com.mystx.app.ui.components.MystDivider
+import com.mystx.app.ui.components.MystDropdownMenuItem
+import com.mystx.app.ui.components.MystExposedDropdownMenu
 import com.mystx.app.ui.components.MystGradientButton
+import com.mystx.app.ui.components.MystTextField
 import com.mystx.app.ui.components.MystTonalButton
 import com.mystx.app.ui.components.ScreenTitle
-import com.mystx.app.ui.components.MystCard
-import com.mystx.app.ui.components.MystDivider
-import com.mystx.app.ui.components.MystTextField
-import com.mystx.app.ui.components.MystExposedDropdownMenu
-import com.mystx.app.ui.components.MystDropdownMenuItem
-
-import androidx.compose.ui.draw.clip
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     commandManager: CommandManager,
+    commandStudioStore: CommandStudioStore,
     prefs: SharedPreferences,
     keyManager: KeyManager,
     onNavigateToCommandStudio: () -> Unit = {}
@@ -145,6 +143,7 @@ fun SettingsScreen(
         onDispose {
             saveEndpointJob?.cancel()
             saveModelJob?.cancel()
+            saveLangJob?.cancel()
             val editor = prefs.edit()
             var needsWrite = false
             if (customEndpoint != (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "")) {
@@ -152,11 +151,18 @@ fun SettingsScreen(
                     EndpointValidator.validate(customEndpoint) == EndpointValidator.Error.NONE
                 if (isValid) {
                     editor.putString(PrefKeys.CUSTOM_ENDPOINT, customEndpoint)
+                        .remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT)
                     needsWrite = true
                 }
             }
             if (customModel != (prefs.getString(PrefKeys.CUSTOM_MODEL, "") ?: "")) {
                 editor.putString(PrefKeys.CUSTOM_MODEL, customModel)
+                    .remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT)
+                needsWrite = true
+            }
+            val normalizedLang = explainLanguage.ifBlank { "Tenglish" }
+            if (normalizedLang != (prefs.getString(PrefKeys.EXPLAIN_LANGUAGE, "Tenglish") ?: "Tenglish")) {
+                editor.putString(PrefKeys.EXPLAIN_LANGUAGE, normalizedLang)
                 needsWrite = true
             }
             if (needsWrite) editor.apply()
@@ -171,13 +177,20 @@ fun SettingsScreen(
         uri?.let {
             scope.launch {
                 try {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(it)?.use { os ->
-                            os.write(commandManager.exportCommands().toByteArray())
+                    val written = withContext(Dispatchers.IO) {
+                        val os = context.contentResolver.openOutputStream(it) ?: return@withContext false
+                        os.use { stream ->
+                            stream.write(commandStudioStore.exportBackupJson().toByteArray(Charsets.UTF_8))
                         }
+                        true
                     }
-                    backupMessage = exportSuccessMsg
-                    backupSuccess = true
+                    if (written) {
+                        backupMessage = exportSuccessMsg
+                        backupSuccess = true
+                    } else {
+                        backupMessage = exportErrorMsg
+                        backupSuccess = false
+                    }
                 } catch (_: Exception) {
                     backupMessage = exportErrorMsg
                     backupSuccess = false
@@ -190,13 +203,25 @@ fun SettingsScreen(
         uri?.let {
             scope.launch {
                 try {
-                    val json = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
-                            val text = reader.readText().removePrefix("\uFEFF")
-                            if (text.length > 1_000_000) null else text
-                        } ?: ""
+                    val imported = withContext(Dispatchers.IO) {
+                        val json = context.contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+                            val maxChars = 1_000_000
+                            val sb = StringBuilder()
+                            val buf = CharArray(8192)
+                            var total = 0
+                            while (true) {
+                                val read = reader.read(buf)
+                                if (read == -1) break
+                                total += read
+                                if (total > maxChars + 1) return@use null
+                                sb.append(buf, 0, read)
+                            }
+                            val text = sb.toString().removePrefix("\uFEFF")
+                            if (text.length > maxChars) null else text
+                        } ?: return@withContext false
+                        commandStudioStore.importBackupJson(json)
                     }
-                    if (commandManager.importCommands(json)) {
+                    if (imported) {
                         backupMessage = importSuccessMsg
                         backupSuccess = true
                     } else {
@@ -291,7 +316,6 @@ fun SettingsScreen(
                     },
                     onValueChange = {},
                     readOnly = true,
-                    
                     modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 )
                 MystExposedDropdownMenu(
@@ -571,10 +595,11 @@ fun SettingsScreen(
                                 }
                             }.onFailure { e ->
                                 val raw = e.message ?: ""
+                                val redacted = ApiClientUtils.redactSecrets(raw)
                                 fetchMessage = if (raw.contains(ApiClientUtils.SIGNIN_REQUIRED_MARKER)) {
                                     signinRequiredMsg
-                                } else if (raw.isNotBlank()) {
-                                    raw
+                                } else if (redacted.isNotBlank()) {
+                                    redacted
                                 } else {
                                     modelsFailedMsg
                                 }
@@ -638,7 +663,6 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        
         // Card: Explain Language
         MystCard {
             Text(
@@ -673,7 +697,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
-        
+
         Spacer(modifier = Modifier.height(8.dp))
 
         // Card 2: Trigger Prefix
@@ -718,7 +742,6 @@ fun SettingsScreen(
                 )
             }
         }
-
 
         // Card 3: Backup
         MystCard {
@@ -777,7 +800,10 @@ fun SettingsScreen(
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable(interactionSource = null, indication = null) {
-                    uriHandler.openUri("https://www.instagram.com/mystx.navadeep?igsi=MWdyNzN4NWFmaTAyaA==")
+                    try {
+                        uriHandler.openUri("https://www.instagram.com/mystx.navadeep?igsi=MWdyNzN4NWFmaTAyaA==")
+                    } catch (_: Exception) {
+                    }
                 }
             )
         }

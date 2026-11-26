@@ -3,6 +3,7 @@ import com.mystx.app.R
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.icu.text.DecimalFormatSymbols
@@ -46,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -76,6 +78,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -197,10 +200,10 @@ private const val PERMISSIONS_POLICY =
             "usb=(), " +
             "xr-spatial-tracking=()"
 
-private val ICC_PATH_RE = Regex("^/viewer/iccs/.*\\.icc$")
-private val BCMAP_PATH_RE = Regex("^/viewer/cmaps/.*\\.bcmap$")
-private val PFB_PATH_RE = Regex("^/viewer/standard_fonts/.*\\.pfb$")
-private val TTF_PATH_RE = Regex("^/viewer/standard_fonts/.*\\.ttf$")
+private val ICC_PATH_RE = Regex("^/viewer/iccs/[a-zA-Z0-9._-]+\\.icc$")
+private val BCMAP_PATH_RE = Regex("^/viewer/cmaps/[a-zA-Z0-9._-]+\\.bcmap$")
+private val PFB_PATH_RE = Regex("^/viewer/standard_fonts/[a-zA-Z0-9._-]+\\.pfb$")
+private val TTF_PATH_RE = Regex("^/viewer/standard_fonts/[a-zA-Z0-9._-]+\\.ttf$")
 
 private val JS_PATHS = setOf(
     "/viewer/js/index.js",
@@ -228,7 +231,9 @@ fun PdfViewerScreen(
     initialMimeError: Boolean = false,
     onRequestRecreate: () -> Unit = {},
     onWebViewCreated: (WebView) -> Unit = {},
-    onWebViewDestroyed: () -> Unit, onSelectionChanged: (String) -> Unit = {}
+    onWebViewDestroyed: () -> Unit,
+    onSelectionChanged: (String) -> Unit = {},
+    onClose: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val activity = context as Activity
@@ -288,7 +293,10 @@ fun PdfViewerScreen(
         }
     }
 
-    val channel = remember { PdfJsChannel(viewModel, onSelectionChanged) }
+    val currentOnSelectionChanged by rememberUpdatedState(onSelectionChanged)
+    val channel = remember(viewModel) {
+        PdfJsChannel(viewModel) { text -> currentOnSelectionChanged(text) }
+    }
 
     SideEffect {
         WindowCompat.getInsetsController(activity.window, view)
@@ -399,10 +407,13 @@ fun PdfViewerScreen(
     ) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         result.data?.data?.let { newUri ->
+            val sameUri = viewModel.uri.value == newUri
             viewModel.setUri(newUri)
             viewModel.resetDocumentState()
             viewModel.setToolbarVisible(true)
-            loadPdf(viewModel, webView)
+            if (sameUri) {
+                loadPdf(viewModel, webView)
+            }
         }
     }
 
@@ -418,9 +429,9 @@ fun PdfViewerScreen(
     }
 
     val legacyFileUriMessage = stringResource(R.string.legacy_file_uri)
-    LaunchedEffect(webView) {
+    LaunchedEffect(webView, uri) {
         val wv = webView ?: return@LaunchedEffect
-        val currentUri = viewModel.uri.value ?: return@LaunchedEffect
+        val currentUri = uri ?: return@LaunchedEffect
         if (viewModel.webViewCrashed.value) return@LaunchedEffect
         if (currentUri.scheme == "file") {
             snackbarHostState.showSnackbar(
@@ -514,12 +525,19 @@ fun PdfViewerScreen(
                 onMenuToggle = { showMenu = it },
                 onPrevious = { jumpToPage(viewModel, webView, page - 1) },
                 onNext = { jumpToPage(viewModel, webView, page + 1) },
+                onClose = onClose,
                 onOpen = {
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
                         type = PDF_MIME
                     }
-                    openDocumentLauncher.launch(intent)
+                    try {
+                        openDocumentLauncher.launch(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        viewModel.postSnackbar(R.string.error_while_opening)
+                    } catch (_: Exception) {
+                        viewModel.postSnackbar(R.string.error_while_opening)
+                    }
                 },
                 onFirst = { jumpToPage(viewModel, webView, 1) },
                 onLast = { jumpToPage(viewModel, webView, numPages) },
@@ -546,7 +564,13 @@ fun PdfViewerScreen(
                         type = PDF_MIME
                         putExtra(Intent.EXTRA_TITLE, documentName)
                     }
-                    saveAsLauncher.launch(intent)
+                    try {
+                        saveAsLauncher.launch(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        viewModel.postSnackbar(R.string.error_while_saving)
+                    } catch (_: Exception) {
+                        viewModel.postSnackbar(R.string.error_while_saving)
+                    }
                 },
                 onDocumentProperties = { showDocProperties = true },
                 onToggleTextLayer = {
@@ -679,7 +703,7 @@ private fun createWebViewClient(context: Context, viewModel: PdfViewModel): WebV
             if (request.method != "GET") return null
 
             val url = request.url
-            if (url.host != "localhost") return null
+            if (url.scheme != "https" || url.host != "localhost") return null
             val path = url.path ?: return null
             Log.d(TAG, "path $path")
 
@@ -734,14 +758,14 @@ private fun createWebViewClient(context: Context, viewModel: PdfViewModel): WebV
             viewModel.setDocumentLoaded(true)
             loadPdfWithPassword(viewModel, view, viewModel.encryptedDocumentPassword)
             view.evaluateJavascript("""
-                var style = document.createElement('style');
-                style.innerHTML = '.textLayer { touch-action: auto !important; }';
-                document.head.appendChild(style);
-                
-                document.addEventListener("selectionchange", function() {
-                    var text = window.getSelection().toString();
-                    window.channel.onSelectionChanged(text);
-                });
+                if (!window.__mystxSelectionBound) {
+                    window.__mystxSelectionBound = true;
+                    document.addEventListener("selectionchange", function() {
+                        var sel = window.getSelection();
+                        var text = sel ? sel.toString() : "";
+                        window.channel.onSelectionChanged(text);
+                    });
+                }
             """.trimIndent(), null)
         }
 
@@ -801,9 +825,13 @@ private fun shareDocument(context: Context, viewModel: PdfViewModel) {
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(
-        Intent.createChooser(shareIntent, context.getString(R.string.action_share))
-    )
+    try {
+        context.startActivity(
+            Intent.createChooser(shareIntent, context.getString(R.string.action_share))
+        )
+    } catch (_: ActivityNotFoundException) {
+    } catch (_: Exception) {
+    }
 }
 
 private fun purgeWebView(webView: WebView) {
@@ -830,6 +858,7 @@ private fun PdfTopAppBar(
     onMenuToggle: (Boolean) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onClose: (() -> Unit)? = null,
     onOpen: () -> Unit,
     onFirst: () -> Unit,
     onLast: () -> Unit,
@@ -850,6 +879,16 @@ private fun PdfTopAppBar(
 ) {
     TopAppBar(
         title = { Text(title, maxLines = 1) },
+        navigationIcon = {
+            if (onClose != null) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.action_close)
+                    )
+                }
+            }
+        },
         modifier = modifier,
         colors = darkTopAppBarColors(),
         actions = {

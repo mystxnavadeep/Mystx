@@ -1,11 +1,15 @@
 package com.mystx.app.service.discovery
 
 import com.mystx.app.api.ApiClientUtils
+import com.mystx.app.api.optStringOrNull
 import com.mystx.app.model.GroqModels
 import com.mystx.app.model.ModelInfo
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.GroqConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -26,15 +30,19 @@ class GroqModelDiscovery : ProviderModelDiscovery {
 
     override suspend fun discover(apiKey: String?, endpoint: String): Result<List<ModelInfo>> =
         withContext(Dispatchers.IO) {
-            val key = apiKey?.trim()
+            val key = apiKey?.replace("\r", "")?.replace("\n", "")?.trim()
             if (key.isNullOrBlank()) {
                 return@withContext Result.failure(Exception("API key required for Groq model discovery"))
             }
 
             var connection: HttpURLConnection? = null
+            val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+                if (cause is CancellationException) connection?.disconnect()
+            }
             try {
                 val url = "${GroqConfig.ENDPOINT}/models"
                 connection = URL(url).openConnection() as HttpURLConnection
+                connection.instanceFollowRedirects = false
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("Authorization", "Bearer $key")
                 connection.connectTimeout = 15_000
@@ -47,13 +55,20 @@ class GroqModelDiscovery : ProviderModelDiscovery {
                     Result.success(if (models.isNotEmpty()) models else fallbackModels())
                 } else {
                     val errorBody = ApiClientUtils.readErrorBody(connection)
-                    val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                    val apiMessage = ApiClientUtils.redactSecrets(
+                        ApiClientUtils.extractApiErrorMessage(errorBody),
+                        key
+                    )
                     val detail = if (apiMessage.isNotBlank()) apiMessage else "Error $responseCode"
                     Result.failure(Exception(detail))
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Result.failure(e)
+                val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Model discovery failed", key)
+                Result.failure(Exception(safeMsg))
             } finally {
+                completionHandle?.dispose()
                 connection?.disconnect()
             }
         }
@@ -67,7 +82,7 @@ class GroqModelDiscovery : ProviderModelDiscovery {
             val arr = root.optJSONArray("data") ?: return emptyList()
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
-                val id = obj.optString("id", "").trim()
+                val id = obj.optStringOrNull("id")?.trim() ?: ""
                 if (id.isBlank() || !seen.add(id)) continue
 
                 // Check active flag if present

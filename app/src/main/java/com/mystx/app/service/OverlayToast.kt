@@ -26,6 +26,7 @@ import com.mystx.app.ui.components.MystToastTokens
 class OverlayToast(private val context: Context, private val handler: Handler) {
 
     private var currentOverlayToast: View? = null
+    private var animatingOutToast: View? = null
     private var dismissRunnable: Runnable? = null
     private var dismissAnimator: AnimatorSet? = null
     private var enterAnimator: AnimatorSet? = null
@@ -33,6 +34,16 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
     private fun dp(value: Int): Int {
         val density = context.resources.displayMetrics.density
         return (value * density + 0.5f).toInt()
+    }
+
+    private fun removeViewSafely(view: View) {
+        try {
+            view.visibility = View.GONE
+            if (view.isAttachedToWindow) {
+                val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                wm.removeViewImmediate(view)
+            }
+        } catch (_: Exception) {}
     }
 
     /** Show [msg], replacing any currently-visible overlay toast. */
@@ -94,7 +105,7 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
         }
     }
 
-    /** Immediately remove any overlay toast (no exit animation). */
+    /** Immediately remove any overlay toast (including one currently animating out). */
     fun dismiss() {
         dismissRunnable?.let { handler.removeCallbacks(it) }
         dismissRunnable = null
@@ -103,12 +114,12 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
         dismissAnimator?.cancel()
         dismissAnimator = null
         currentOverlayToast?.let { view ->
-            try {
-                view.visibility = View.GONE
-                val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                wm.removeView(view)
-            } catch (_: Exception) {}
             currentOverlayToast = null
+            removeViewSafely(view)
+        }
+        animatingOutToast?.let { view ->
+            animatingOutToast = null
+            removeViewSafely(view)
         }
     }
 
@@ -118,9 +129,15 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
         enterAnimator?.cancel()
         enterAnimator = null
         dismissAnimator?.cancel()
+        dismissAnimator = null
+        animatingOutToast?.let { stale ->
+            animatingOutToast = null
+            removeViewSafely(stale)
+        }
         currentOverlayToast?.let { view ->
+            currentOverlayToast = null
+            animatingOutToast = view
             try {
-                val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
                 dismissAnimator = AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(view, View.ALPHA, view.alpha, 0f),
@@ -130,15 +147,23 @@ class OverlayToast(private val context: Context, private val handler: Handler) {
                     interpolator = DecelerateInterpolator()
                     addListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
-                            view.visibility = View.GONE
-                            try { wm.removeView(view) } catch (_: Exception) {}
-                            dismissAnimator = null
+                            removeViewSafely(view)
+                            if (animatingOutToast === view) {
+                                animatingOutToast = null
+                            }
+                            if (dismissAnimator === animation) {
+                                dismissAnimator = null
+                            }
                         }
                     })
                     start()
                 }
-            } catch (_: Exception) {}
-            currentOverlayToast = null
+            } catch (_: Exception) {
+                removeViewSafely(view)
+                if (animatingOutToast === view) {
+                    animatingOutToast = null
+                }
+            }
         }
     }
 

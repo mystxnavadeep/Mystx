@@ -1,6 +1,9 @@
 package com.mystx.app.api
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,9 +21,13 @@ class GeminiClient {
 
     suspend fun validateKey(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
         try {
             connection = URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1")
                 .openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
             connection.requestMethod = "GET"
             connection.setRequestProperty("x-goog-api-key", apiKey)
             connection.connectTimeout = 15_000
@@ -35,7 +42,10 @@ class GeminiClient {
                 Result.success("Valid")
             } else {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    apiKey
+                )
 
                 when (responseCode) {
                     429 -> Result.failure(Exception("Rate limited. Please try again later."))
@@ -49,9 +59,13 @@ class GeminiClient {
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unexpected error", apiKey)
+            Result.failure(Exception(safeMsg))
         } finally {
+            completionHandle?.dispose()
             connection?.disconnect()
         }
     }
@@ -87,7 +101,7 @@ class GeminiClient {
         return result
     }
 
-    private fun doGenerate(
+    private suspend fun doGenerate(
         prompt: String,
         text: String,
         apiKey: String,
@@ -96,11 +110,19 @@ class GeminiClient {
         withStructured: Boolean,
         thinkingLevel: String? = null
     ): Result<GenerateResult> {
+        val safeModel = model.replace(Regex("[^a-zA-Z0-9._-]"), "")
+        if (safeModel.isBlank() || safeModel.contains("..")) {
+            return Result.failure(ApiException(ApiError.Other("Invalid model name"), "Invalid model name"))
+        }
+
         var connection: HttpURLConnection? = null
+        val completionHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection?.disconnect()
+        }
         return try {
-            val safeModel = model.replace(Regex("[^a-zA-Z0-9._-]"), "")
             connection = URL("https://generativelanguage.googleapis.com/v1beta/models/$safeModel:generateContent")
                 .openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("x-goog-api-key", apiKey)
@@ -108,11 +130,12 @@ class GeminiClient {
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
 
+            val boundaryTag = ApiClientUtils.generateBoundaryTag()
             val jsonBody = JSONObject().apply {
                 put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().apply {
                         put(JSONObject().apply {
-                            put("text", ApiClientUtils.SYSTEM_PROMPT_PREFIX + prompt)
+                            put("text", ApiClientUtils.buildSystemPromptPrefix(boundaryTag) + prompt)
                         })
                     })
                 })
@@ -120,7 +143,7 @@ class GeminiClient {
                     put(JSONObject().apply {
                         put("parts", JSONArray().apply {
                             put(JSONObject().apply {
-                                put("text", ApiClientUtils.wrapUserText(text))
+                                put("text", ApiClientUtils.wrapUserTextWithTag(text, boundaryTag))
                             })
                         })
                     })
@@ -168,9 +191,10 @@ class GeminiClient {
                 val jsonResponse = JSONObject(response)
                 val candidates = jsonResponse.optJSONArray("candidates")
                 if (candidates != null && candidates.length() > 0) {
-                    val candidate = candidates.getJSONObject(0)
+                    val candidate = candidates.optJSONObject(0)
+                        ?: return Result.failure(Exception("No candidates found in response"))
 
-                    val finishReason = candidate.optString("finishReason", "")
+                    val finishReason = candidate.optStringOrNull("finishReason") ?: ""
                     if (finishReason in setOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "SPII", "BLOCKLIST")) {
                         return Result.failure(Exception("Response blocked by safety filters"))
                     }
@@ -178,14 +202,24 @@ class GeminiClient {
                     val content = candidate.optJSONObject("content")
                     val parts = content?.optJSONArray("parts")
                     if (parts != null && parts.length() > 0) {
-                        var resultText = parts.getJSONObject(0).optString("text", "")
+                        val sb = StringBuilder()
+                        for (i in 0 until parts.length()) {
+                            val part = parts.optJSONObject(i) ?: continue
+                            if (part.optBoolean("thought", false)) continue
+                            val partText = part.optStringOrNull("text") ?: continue
+                            sb.append(partText)
+                        }
+                        var resultText = sb.toString()
                         if (resultText.isBlank()) {
                             return Result.failure(Exception("Model returned empty response"))
                         }
 
+                        val isTruncated = finishReason == "MAX_TOKENS"
                         if (withStructured) {
                             val (extracted, parseFailed) = ApiClientUtils.tryExtractStructuredText(resultText)
-                            if (extracted != null) return Result.success(GenerateResult(extracted))
+                            if (extracted != null) {
+                                return Result.success(GenerateResult(extracted, truncated = isTruncated))
+                            }
                             // Same guard as the OpenAI-compatible client: never paste a raw
                             // JSON payload into the user's field when the structured response
                             // is unusable (parsed with no "text", or malformed/truncated JSON).
@@ -199,7 +233,7 @@ class GeminiClient {
                         Result.success(GenerateResult(
                             resultText,
                             structuredOutputFailed = withStructured,
-                            truncated = finishReason == "MAX_TOKENS"))
+                            truncated = isTruncated))
                     } else {
                         Result.failure(Exception("No content found in response"))
                     }
@@ -209,7 +243,7 @@ class GeminiClient {
                     // candidates entirely. Reporting this as an empty response told the user
                     // to "try again", which can never succeed.
                     val blockReason = jsonResponse.optJSONObject("promptFeedback")
-                        ?.optString("blockReason", "") ?: ""
+                        ?.optStringOrNull("blockReason") ?: ""
                     if (blockReason.isNotEmpty()) {
                         Result.failure(Exception("Response blocked by safety filters ($blockReason)"))
                     } else {
@@ -217,27 +251,34 @@ class GeminiClient {
                     }
                 }
             } else if (responseCode == 413) {
-                // Request too large for this key's per-minute token budget. Groq enforces
-                // TPM per organization, so another key (different org) may still have
-                // headroom. Classified as a rate limit so the caller cools this key down
-                // briefly and rotates, instead of hard-failing the whole command.
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    apiKey
+                )
                 val detail = if (apiMessage.isNotEmpty()) apiMessage else "Request too large"
                 Result.failure(ApiException(ApiError.RequestTooLarge(detail), detail))
             } else if (responseCode == 429) {
                 val retryAfter = connection.getHeaderField("Retry-After")
-                val seconds = retryAfter?.toIntOrNull()
+                val seconds = ApiClientUtils.parseRetryAfterSeconds(retryAfter)
+                    ?.coerceIn(0L, Int.MAX_VALUE.toLong())
+                    ?.toInt()
                 val msg = if (seconds != null) "Rate limit exceeded, retry after ${seconds}s" else "Rate limit exceeded"
                 Result.failure(ApiException(ApiError.RateLimit(msg, seconds), msg))
             } else if (responseCode == 503) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    apiKey
+                )
                 val detail = if (apiMessage.isNotEmpty()) apiMessage else "Model unavailable due to high demand"
                 Result.failure(ApiException(ApiError.ServerError(detail), detail))
             } else if (responseCode == 400 || responseCode == 422) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    apiKey
+                )
                 // Gemini reports invalid API keys as HTTP 400 (reason: API_KEY_INVALID).
                 // Classify as InvalidKey so the caller marks the key and rotates to the next one.
                 if (errorBody.contains("API_KEY_INVALID") ||
@@ -250,12 +291,18 @@ class GeminiClient {
                 }
             } else if (responseCode == 401 || responseCode == 403) {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                val apiMessage = ApiClientUtils.extractApiErrorMessage(errorBody)
+                val apiMessage = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.extractApiErrorMessage(errorBody),
+                    apiKey
+                )
                 val detail = if (apiMessage.isNotEmpty()) apiMessage else "Invalid API key"
                 Result.failure(ApiException(ApiError.InvalidKey(detail), detail))
             } else {
                 val errorBody = ApiClientUtils.readErrorBody(connection)
-                var detail = ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)")
+                var detail = ApiClientUtils.redactSecrets(
+                    ApiClientUtils.sanitizeErrorForUser(responseCode, errorBody, "Unexpected error (HTTP $responseCode)"),
+                    apiKey
+                )
                 // Mirror the OpenAI-compatible client: normalize an unknown/inaccessible model
                 // onto the existing translated "model not found" string instead of raw English.
                 val providerCode = ApiClientUtils.extractApiErrorCode(errorBody)
@@ -265,15 +312,20 @@ class GeminiClient {
                 val apiError = if (responseCode in 500..599) ApiError.ServerError(detail) else ApiError.Other(detail)
                 Result.failure(ApiException(apiError, detail))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Unknown error", apiKey)
             val apiError = when (e) {
                 is ApiException -> e.apiError
-                is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException -> ApiError.Network(e.message ?: "Network error")
+                is SocketTimeoutException, is UnknownHostException, is ConnectException, is java.net.SocketException ->
+                    ApiError.Network(ApiClientUtils.redactSecrets(e.message ?: "Network error", apiKey))
                 is org.json.JSONException -> ApiError.Other("Invalid response from server")
-                else -> ApiError.Other(e.message ?: "Unknown error")
+                else -> ApiError.Other(safeMsg)
             }
-            if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, e.message ?: "Unknown error"))
+            if (e is ApiException) Result.failure(e) else Result.failure(ApiException(apiError, safeMsg))
         } finally {
+            completionHandle?.dispose()
             connection?.disconnect()
         }
     }

@@ -4,7 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -32,6 +32,7 @@ import com.mystx.app.ui.processtext.ProcessTextReplacementBridge
 import com.mystx.app.ui.processtext.resolveProcessTextEdit
 import com.mystx.app.R
 import com.mystx.app.MystxApp
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -92,11 +93,24 @@ class AssistantService : AccessibilityService() {
     @Volatile
     private var lastReplacedSource: AccessibilityNodeInfo? = null
     private var verifyRunnable: Runnable? = null
-    /** (clipboard, originalClip, ourText) for a paste-fallback restore that has not run yet. */
-    private var pendingClipRestore: Triple<android.content.ClipboardManager, ClipData?, String>? = null
+    /** (clipboard, originalClip, clipLabel) for a paste-fallback restore that has not run yet. */
+    private var pendingClipRestore: Triple<ClipboardManager, ClipData?, String>? = null
     private var lastTriggerRefresh = 0L
     private var watchdogRunnable: Runnable? = null
-    private val overlayToast by lazy { OverlayToast(this@AssistantService, handler) }
+    private var commandsPrefs: SharedPreferences? = null
+    private var studioPrefs: SharedPreferences? = null
+    private var settingsPrefs: SharedPreferences? = null
+    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        if (::commandManager.isInitialized) {
+            lastTriggerRefresh = 0L
+            updateTriggers()
+        }
+    }
+    private var overlayToastInitialized = false
+    private val overlayToast by lazy {
+        overlayToastInitialized = true
+        OverlayToast(this@AssistantService, handler)
+    }
 
     /**
      * Stable identity for the field an undo point belongs to.
@@ -117,36 +131,92 @@ class AssistantService : AccessibilityService() {
         const val TAG = "MystxService"
         const val TRIGGER_REFRESH_INTERVAL_MS = 5_000L
         const val PROCESSING_WATCHDOG_MS = 120_000L
+        const val WATCHDOG_FORCE_RESET_DELAY_MS = 1_500L
         const val FOCUS_FALLBACK_MIN_INTERVAL_MS = 300L
+        const val MAX_DEPTH = 20
+        const val NODE_BUDGET = 250
+        const val MAX_SCREEN_TEXT_CHARS = 4000
         val SPINNER_FRAMES = arrayOf("◐", "◓", "◑", "◒")
+
+        val SENSITIVE_PACKAGES = setOf(
+            "com.android.systemui",
+            // Password managers
+            "com.agilebits.onepassword",
+            "com.onepassword.android",
+            "com.x8bit.bitwarden",
+            "com.dashlane",
+            "com.lastpass.lpandroid",
+            "keepass2android.keepass2android",
+            "keepass2android.keepass2android_nonet",
+            "com.kunzisoft.keepass.free",
+            "com.kunzisoft.keepass.libre",
+            "com.kunzisoft.keepass.pro",
+            "com.callpod.android_apps.keeper",
+            "com.nordpass.android.app.password.manager",
+            "proton.android.pass",
+            "com.enpass.android",
+            // Authenticators / 2FA
+            "com.google.android.apps.authenticator2",
+            "com.authy.authy",
+            "com.azure.authenticator",
+            "com.duosecurity.duomobile",
+            "org.fedorahosted.freeotp",
+            "org.fedorahosted.freeotpplus",
+            "com.yubico.yubioath",
+            "com.beemdevelopment.aegis",
+            // Payments / wallets
+            "com.google.android.apps.walletnfcrel",
+            "com.google.android.apps.nbu.paisa.user",
+            "com.phonepe.app",
+            "net.one97.paytm",
+            "com.paypal.android.p2pmobile",
+            "com.venmo",
+            "com.squareup.cash"
+        )
+
+        val SENSITIVE_PACKAGE_KEYWORDS = listOf(
+            "1password",
+            "bitwarden",
+            "keepass",
+            "dashlane",
+            "lastpass",
+            "authenticator",
+            "password",
+            "keychain",
+            "bank",
+            "banking",
+            "wallet",
+            "payment",
+            ".pay.",
+            ".pay"
+        )
     }
 
-    private val replaceReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context, intent: Intent) {
-            if (intent.action == "com.mystx.app.ACTION_REPLACE_TEXT") {
-                val replacement = intent.getStringExtra("replacement") ?: return
-                serviceScope.launch {
-                    val source = findFocusedEditableSource() ?: return@launch
-                    replaceText(source, replacement, false)
-                    source.recycle()
-                }
-            }
+    private fun isSensitivePackage(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return false
+        val lower = pkg.lowercase(Locale.ROOT)
+        if (lower in SENSITIVE_PACKAGES) return true
+        return SENSITIVE_PACKAGE_KEYWORDS.any { keyword ->
+            if (keyword == ".pay") lower.endsWith(".pay") else lower.contains(keyword)
         }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         try {
-            val filter = android.content.IntentFilter("com.mystx.app.ACTION_REPLACE_TEXT")
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(replaceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                registerReceiver(replaceReceiver, filter)
-            }
             keyManager = (applicationContext as MystxApp).keyManager
             commandManager = CommandManager(applicationContext)
             commandStudioStore = CommandStudioStore(applicationContext, commandManager)
             statsManager = StatsManager(applicationContext)
+            commandsPrefs = applicationContext.getSharedPreferences("commands", Context.MODE_PRIVATE).also {
+                it.registerOnSharedPreferenceChangeListener(prefChangeListener)
+            }
+            studioPrefs = applicationContext.getSharedPreferences("command_studio", Context.MODE_PRIVATE).also {
+                it.registerOnSharedPreferenceChangeListener(prefChangeListener)
+            }
+            settingsPrefs = applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE).also {
+                it.registerOnSharedPreferenceChangeListener(prefChangeListener)
+            }
             updateTriggers()
         } catch (e: Exception) {
             // This callback runs on the binder thread with no framework guard: an exception
@@ -169,8 +239,15 @@ class AssistantService : AccessibilityService() {
         watchdogRunnable?.let { handler.removeCallbacks(it) }
         val runnable = Runnable {
             if (isProcessing.get()) {
-                currentJob?.cancel()
-                isProcessing.set(false)
+                val stuckJob = currentJob
+                stuckJob?.cancel()
+                // Let the cancelled job's finally block release isProcessing cleanly;
+                // only force-reset if still stuck after cleanup.
+                handler.postDelayed({
+                    if (isProcessing.get() && (currentJob === stuckJob || currentJob == null)) {
+                        isProcessing.set(false)
+                    }
+                }, WATCHDOG_FORCE_RESET_DELAY_MS)
             }
         }
         watchdogRunnable = runnable
@@ -216,7 +293,9 @@ class AssistantService : AccessibilityService() {
 
     private fun handleAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) return
-        if (event.packageName?.toString() == packageName) return
+        val eventPkg = event.packageName?.toString()
+        if (eventPkg == packageName) return
+        if (isSensitivePackage(eventPkg)) return
         if (!::keyManager.isInitialized) return
 
         // Some hosts (WeChat-style editors, WebView fields) emit text-changed events whose
@@ -230,180 +309,183 @@ class AssistantService : AccessibilityService() {
             lastFocusFallbackAt = now
             findFocusedEditableSource()
         } ?: return
-        if (source.isPassword) {
-            source.safeRecycle()
-            return
-        }
-        val text = source.text?.toString() ?: run {
-            source.safeRecycle()
-            return
-        }
-        if (handlePendingProcessTextReplacement(event, source, text)) return
-        if (isProcessing.get()) {
-            source.safeRecycle()
-            return
-        }
-        if (text.isEmpty()) {
-            verifyRunnable?.let { handler.removeCallbacks(it) }
-            lastReplacedText = null
-            val prev = lastReplacedSource
-            lastReplacedSource = null
-            if (prev != null && prev !== source) {
-                prev.safeRecycle()
-            }
-            source.safeRecycle()
-            return
-        }
 
-        // Skip events where text matches what we just replaced (prevents IME re-commit race)
-        val replaced = lastReplacedText
-        if (replaced != null && text == replaced &&
-            System.currentTimeMillis() - lastReplacedAt < 1000) {
-            source.safeRecycle()
-            return
-        }
-
-        if (System.currentTimeMillis() - lastTriggerRefresh > TRIGGER_REFRESH_INTERVAL_MS) {
-            updateTriggers()
-        }
-
-        val lastChar = text[text.length - 1]
-        if (!triggerLastChars.contains(lastChar)) {
-            if (!lastChar.isLetterOrDigit() || !text.contains(cachedTranslatePrefix)) {
+        var handedOff = false
+        try {
+            if (isSensitivePackage(source.packageName?.toString())) {
                 source.safeRecycle()
+                handedOff = true
                 return
             }
-        }
-
-        val command = commandManager.findCommand(text) ?: run {
-            source.safeRecycle()
-            return
-        }
-
-        val richCommand = commandStudioStore.getRichForCommand(command)
-        if (!richCommand.enabled) {
-            source.safeRecycle()
-            return
-        }
-
-        val precedingText = text.substring(0, text.length - richCommand.trigger.length)
-        val cleanText = precedingText.trim()
-
-        if (richCommand.trigger.endsWith("mystx") && richCommand.isBuiltIn) {
-            if (!isProcessing.compareAndSet(false, true)) {
+            if (source.isPassword) {
                 source.safeRecycle()
+                handedOff = true
                 return
             }
-            startWatchdog()
-            cancelPendingProcessingReset()
-            currentJob?.cancel()
-            currentJob = serviceScope.launch {
-                val thisJob = coroutineContext[Job]
-                try {
-                    val replacerOk = replaceText(source, precedingText)
-                    if (replacerOk) {
-                        val intent = Intent(this@AssistantService, com.mystx.app.ui.menu.MystxMenuActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                            putExtra(Intent.EXTRA_PROCESS_TEXT, precedingText)
-                        }
-                        startActivity(intent)
-                    }
-                } finally {
-                    withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Main) {
-                        if (currentJob === thisJob) {
-                            cancelWatchdog()
-                            scheduleProcessingReset()
-                        }
-                    }
-                    recycleIfUnowned(source)
+            val text = source.text?.toString() ?: run {
+                source.safeRecycle()
+                handedOff = true
+                return
+            }
+            if (handlePendingProcessTextReplacement(event, source, text)) {
+                handedOff = true
+                return
+            }
+            if (isProcessing.get()) {
+                source.safeRecycle()
+                handedOff = true
+                return
+            }
+            if (text.isEmpty()) {
+                verifyRunnable?.let { handler.removeCallbacks(it) }
+                lastReplacedText = null
+                val prev = lastReplacedSource
+                lastReplacedSource = null
+                if (prev != null && prev !== source) {
+                    prev.safeRecycle()
+                }
+                source.safeRecycle()
+                handedOff = true
+                return
+            }
+
+            // Skip events where text matches what we just replaced (prevents IME re-commit race)
+            val replaced = lastReplacedText
+            if (replaced != null && text == replaced &&
+                System.currentTimeMillis() - lastReplacedAt < 1000) {
+                source.safeRecycle()
+                handedOff = true
+                return
+            }
+
+            if (System.currentTimeMillis() - lastTriggerRefresh > TRIGGER_REFRESH_INTERVAL_MS) {
+                updateTriggers()
+            }
+
+            val lastChar = text[text.length - 1]
+            if (!triggerLastChars.contains(lastChar)) {
+                if (!lastChar.isLetterOrDigit() || !text.contains(cachedTranslatePrefix)) {
+                    source.safeRecycle()
+                    handedOff = true
+                    return
                 }
             }
-            return
-        }
 
-        if (richCommand.trigger.endsWith("undo") && richCommand.isBuiltIn) {
-            if (!isProcessing.compareAndSet(false, true)) {
+            val command = commandManager.findCommand(text) ?: run {
                 source.safeRecycle()
+                handedOff = true
                 return
             }
-            startWatchdog()
-            cancelPendingProcessingReset()
-            currentJob?.cancel()
-            handleUndo(source, cleanText)
-            return
-        }
 
-        if (richCommand.isBuiltIn && (richCommand.trigger.endsWith("copy") || richCommand.trigger.endsWith("cut") ||
-            richCommand.trigger.endsWith("paste") || richCommand.trigger.endsWith("replace"))) {
-            if (!isProcessing.compareAndSet(false, true)) {
+            val richCommand = commandStudioStore.getRichForCommand(command)
+            if (!richCommand.enabled) {
                 source.safeRecycle()
+                handedOff = true
                 return
             }
-            startWatchdog()
-            cancelPendingProcessingReset()
-            currentJob?.cancel()
-            handleClipboardCommand(source, precedingText, command)
-            return
-        }
 
-        when (richCommand.type) {
-            CommandType.TEXT_REPLACER -> {
+            val precedingText = text.substring(0, text.length - richCommand.trigger.length)
+            val cleanText = precedingText.trim()
+
+            if (richCommand.trigger.endsWith("undo") && richCommand.isBuiltIn) {
                 if (!isProcessing.compareAndSet(false, true)) {
                     source.safeRecycle()
+                    handedOff = true
                     return
                 }
                 startWatchdog()
                 cancelPendingProcessingReset()
                 currentJob?.cancel()
-                currentJob = serviceScope.launch {
-                    val thisJob = coroutineContext[Job]
-                    try {
-                        withContext(Dispatchers.Main) {
-                            val replacerOk = replaceText(source, precedingText + richCommand.promptTemplate)
-                            if (!replacerOk) {
-                                // Don't record an undo point, a CONFIRM haptic or a usage stat
-                                // for a replacement the field silently refused.
-                                performHapticFeedback(HapticFeedbackConstants.REJECT)
+                handedOff = true
+                handleUndo(source, cleanText)
+                return
+            }
+
+            if (richCommand.isBuiltIn && (richCommand.trigger.endsWith("copy") || richCommand.trigger.endsWith("cut") ||
+                richCommand.trigger.endsWith("paste") || richCommand.trigger.endsWith("replace"))) {
+                if (!isProcessing.compareAndSet(false, true)) {
+                    source.safeRecycle()
+                    handedOff = true
+                    return
+                }
+                startWatchdog()
+                cancelPendingProcessingReset()
+                currentJob?.cancel()
+                handedOff = true
+                handleClipboardCommand(source, precedingText, command)
+                return
+            }
+
+            when (richCommand.type) {
+                CommandType.TEXT_REPLACER -> {
+                    if (!isProcessing.compareAndSet(false, true)) {
+                        source.safeRecycle()
+                        handedOff = true
+                        return
+                    }
+                    startWatchdog()
+                    cancelPendingProcessingReset()
+                    currentJob?.cancel()
+                    handedOff = true
+                    currentJob = serviceScope.launch {
+                        val thisJob = coroutineContext[Job]
+                        try {
+                            withContext(Dispatchers.Main) {
+                                val replacerOk = replaceText(source, precedingText + richCommand.promptTemplate)
+                                if (!replacerOk) {
+                                    // Don't record an undo point, a CONFIRM haptic or a usage stat
+                                    // for a replacement the field silently refused.
+                                    performHapticFeedback(HapticFeedbackConstants.REJECT)
+                                    showToast(getString(R.string.toast_replace_failed))
+                                } else {
+                                    lastOriginalText = precedingText
+                                    lastUndoSourceId = sourceId(source)
+                                    performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                    statsManager.recordUsage(richCommand.trigger)
+                                }
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
                                 showToast(getString(R.string.toast_replace_failed))
-                            } else {
-                                lastOriginalText = precedingText
-                                lastUndoSourceId = sourceId(source)
-                                performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                statsManager.recordUsage(richCommand.trigger)
                             }
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            showToast(getString(R.string.toast_replace_failed))
-                        }
-                    } finally {
-                        withContext(NonCancellable + Dispatchers.Main) {
-                            if (currentJob === thisJob) {
-                                cancelWatchdog()
-                                scheduleProcessingReset()
+                        } finally {
+                            withContext(NonCancellable + Dispatchers.Main) {
+                                if (currentJob === thisJob) {
+                                    cancelWatchdog()
+                                    scheduleProcessingReset()
+                                }
                             }
+                            recycleIfUnowned(source)
                         }
-                        recycleIfUnowned(source)
                     }
                 }
-            }
-            CommandType.AI -> {
-                val requiresInputText = cleanText.isEmpty() && !richCommand.trigger.endsWith("reply") && !richCommand.promptTemplate.contains("{screen_text}")
-                if (requiresInputText) {
-                    source.safeRecycle()
-                    return
+                CommandType.AI -> {
+                    val requiresInputText = cleanText.isEmpty() && !richCommand.trigger.endsWith("reply") && !richCommand.promptTemplate.contains("{screen_text}")
+                    if (requiresInputText) {
+                        source.safeRecycle()
+                        handedOff = true
+                        return
+                    }
+                    if (!isProcessing.compareAndSet(false, true)) {
+                        source.safeRecycle()
+                        handedOff = true
+                        return
+                    }
+                    startWatchdog()
+                    cancelPendingProcessingReset()
+                    currentJob?.cancel()
+                    handedOff = true
+                    processCommand(source, cleanText, richCommand)
                 }
-                if (!isProcessing.compareAndSet(false, true)) {
-                    source.safeRecycle()
-                    return
-                }
-                startWatchdog()
-                cancelPendingProcessingReset()
-                currentJob?.cancel()
-                processCommand(source, cleanText, richCommand)
             }
+        } catch (e: Exception) {
+            // Ensure even fallback nodes from findFocusedEditableSource() are recycled on exception.
+            if (!handedOff) {
+                recycleIfUnowned(source)
+            }
+            throw e
         }
     }
 
@@ -434,9 +516,19 @@ class AssistantService : AccessibilityService() {
         } ?: return null
         try {
             val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (focused === root) return root
+            if (focused === root) {
+                if (root.isPassword) {
+                    root.safeRecycle()
+                    return null
+                }
+                return root
+            }
             if (focused != null) {
                 root.safeRecycle()
+                if (focused.isPassword) {
+                    focused.safeRecycle()
+                    return null
+                }
                 return focused
             }
             // Second stage: findFocus found nothing, so walk the tree for an editable+focused
@@ -457,11 +549,10 @@ class AssistantService : AccessibilityService() {
     ): Boolean {
         val request = ProcessTextReplacementBridge.current(SystemClock.elapsedRealtime())
             ?: return false
-        // The request's package is optional, but an event without a package can never be
-        // verified against it — previously a pending request with a null sourcePackage was
-        // matched against (and consumed by) an edit in ANY app, or one with no package at all.
+        // Require a known source package that matches the event package to prevent cross-app
+        // replacement hijacking.
         val eventPackage = event.packageName?.toString() ?: return false
-        if (request.sourcePackage != null && eventPackage != request.sourcePackage) {
+        if (request.sourcePackage == null || eventPackage != request.sourcePackage) {
             return false
         }
         val beforeText = event.beforeText?.toString() ?: return false
@@ -480,7 +571,7 @@ class AssistantService : AccessibilityService() {
             // A command is already running. Leave the request pending and the field untouched
             // instead of consuming the request and swallowing the user's keystroke — a later
             // text-changed event inside the bridge TTL can still apply it (#125).
-            source.safeRecycle()
+            // Do NOT recycle `source` when returning false; the caller still owns it.
             return false
         }
         if (!ProcessTextReplacementBridge.consume(request)) {
@@ -551,37 +642,51 @@ class AssistantService : AccessibilityService() {
             try {
                 val lang = PromptPlaceholders.languageFromTrigger(command.trigger)
                 val appPackage = source.packageName?.toString()
-                
+
                 val needsScreenText = command.promptTemplate.contains("{screen_text}") || command.trigger.endsWith("reply")
                 val screenTextStr = if (needsScreenText) {
                     val root = try { rootInActiveWindow } catch (e: Exception) { null }
                     extractScreenText(root, source)
                 } else null
 
-                val finalPromptTemplate = if (command.trigger.endsWith("reply") && !command.promptTemplate.contains("{screen_text}")) {
-                    command.promptTemplate + "\n\nContext from screen:\n{screen_text}"
-                } else {
-                    command.promptTemplate
-                }
-
+                // Prompt injection defense: never interpolate untrusted screen text into the
+                // system prompt. Replace {screen_text} with a pointer and pass the screen context
+                // strictly inside the user payload fenced in <screen_context>...</screen_context>.
+                val sanitizedTemplate = command.promptTemplate
+                    .replace("{screen_text}", "the <screen_context> block in the user input")
                 val placeholderContext = PromptPlaceholders.Context(
                     text = text,
                     language = lang,
                     tone = null,
                     instruction = null,
                     app = appPackage,
-                    screenText = screenTextStr
+                    screenText = null
                 )
-                val finalPrompt = PromptPlaceholders.render(finalPromptTemplate, placeholderContext)
+                val finalPrompt = PromptPlaceholders.render(sanitizedTemplate, placeholderContext)
+                val userPayload = if (needsScreenText && !screenTextStr.isNullOrBlank()) {
+                    if (text.isBlank()) {
+                        "<screen_context>\n$screenTextStr\n</screen_context>"
+                    } else {
+                        "$text\n\n<screen_context>\n$screenTextStr\n</screen_context>"
+                    }
+                } else {
+                    text
+                }
 
-                val cachedResponse = com.mystx.app.model.HistoryManager.findCachedResponse(applicationContext, originalText, command.trigger)
+                // Bypass cache whenever screen context is involved to prevent cross-conversation
+                // cache collisions on ?reply or {screen_text} commands.
+                val cachedResponse = if (needsScreenText) {
+                    null
+                } else {
+                    com.mystx.app.model.HistoryManager.findCachedResponse(applicationContext, originalText, command.trigger)
+                }
                 val outcome = if (cachedResponse != null) {
                     CommandOutcome.Success(cachedResponse)
                 } else {
                     withTimeout(90_000) {
                         runTextCommand(
                             applicationContext, keyManager, client, openAIClient,
-                            finalPrompt, text,
+                            finalPrompt, userPayload,
                             modelOverride = command.modelOverride,
                             temperatureOverride = command.temperature
                         ) { spinnerJob = startInlineSpinner(source, originalText) }
@@ -898,17 +1003,26 @@ class AssistantService : AccessibilityService() {
     ): Boolean = withContext(Dispatchers.Main) {
         var currentSource = source
         var sourceIsOwned = false
+        val expectedPackage = try { source.packageName?.toString() } catch (_: Exception) { null }
+        val expectedSourceId = try { sourceId(source) } catch (_: Exception) { null }
 
         fun refreshOrFallback(): Boolean {
             if (currentSource.refresh()) return true
-            val fallback = findFocusedEditableSource()
-            if (fallback != null) {
-                if (sourceIsOwned && currentSource !== lastReplacedSource) currentSource.safeRecycle()
-                currentSource = fallback
-                sourceIsOwned = true
-                return true
+            val fallback = findFocusedEditableSource() ?: return false
+            val fallbackPkg = try { fallback.packageName?.toString() } catch (_: Exception) { null }
+            val fallbackId = try { sourceId(fallback) } catch (_: Exception) { null }
+            val fallbackIsPassword = try { fallback.isPassword } catch (_: Exception) { true }
+            if (fallbackIsPassword ||
+                expectedPackage == null || fallbackPkg != expectedPackage ||
+                expectedSourceId == null || fallbackId != expectedSourceId
+            ) {
+                fallback.safeRecycle()
+                return false
             }
-            return false
+            if (sourceIsOwned && currentSource !== lastReplacedSource) currentSource.safeRecycle()
+            currentSource = fallback
+            sourceIsOwned = true
+            return true
         }
 
         try {
@@ -949,7 +1063,8 @@ class AssistantService : AccessibilityService() {
             // Clipboard fallback: select all + paste (goes through app's input pipeline)
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val oldClip = clipboard.primaryClip
-            val newClip = ClipData.newPlainText("Mystx Result", newText)
+            val clipLabel = "mystx_paste_${System.currentTimeMillis()}"
+            val newClip = ClipData.newPlainText(clipLabel, newText)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 newClip.description.extras = android.os.PersistableBundle().apply {
                     putBoolean("android.content.extra.IS_SENSITIVE", true)
@@ -960,7 +1075,7 @@ class AssistantService : AccessibilityService() {
             if (!refreshOrFallback() || currentSource.text == null) {
                 // We already replaced the clipboard above; bail out without leaving our temp clip
                 // (which holds the transformed text) as the user's clipboard.
-                if (!callerOwnsClipboard) restoreClipboard(clipboard, oldClip, newText)
+                if (!callerOwnsClipboard) restoreClipboard(clipboard, oldClip, clipLabel)
                 return@withContext false
             }
             val selectAllArgs = Bundle()
@@ -970,7 +1085,9 @@ class AssistantService : AccessibilityService() {
 
             val pasted = currentSource.performAction(AccessibilityNodeInfo.ACTION_PASTE)
 
-            scheduleTextVerification(currentSource, newText)
+            if (pasted) {
+                scheduleTextVerification(currentSource, newText)
+            }
 
             if (!callerOwnsClipboard) {
                 // Deliberately does NOT touch `source`: scheduleTextVerification recycles the node
@@ -978,11 +1095,11 @@ class AssistantService : AccessibilityService() {
                 // pendingClipRestore lets onInterrupt/onDestroy run this synchronously — both flush
                 // the handler, which previously cancelled it and left Mystx's temp clip (the
                 // transformed text) as the user's clipboard indefinitely.
-                val currentPending = Triple(clipboard, oldClip, newText)
+                val currentPending = Triple(clipboard, oldClip, clipLabel)
                 pendingClipRestore = currentPending
                 handler.postDelayed({
                     try {
-                        restoreClipboard(clipboard, oldClip, newText)
+                        restoreClipboard(clipboard, oldClip, clipLabel)
                     } catch (_: Exception) {
                     } finally {
                         if (pendingClipRestore === currentPending) {
@@ -1002,27 +1119,22 @@ class AssistantService : AccessibilityService() {
     }
 
     /**
-     * Puts the user's clipboard back after the paste fallback in [replaceText].
-     *
-     * [oldClip] is null whenever the read was denied, which is the normal case: framework
-     * ClipboardService gates OP_READ_CLIPBOARD on window focus / default-IME status, and an
-     * accessibility service is neither. So this cannot verify what is currently on the
-     * clipboard, and it cannot restore what was there before.
-     *
-     * Leaving Mystx's temp clip in place is not an option — it holds the user's
-     * transformed text and would be handed to every later paste, and IS_SENSITIVE only
-     * applies from API 33. Previously the fallback therefore cleared the clipboard outright,
-     * which destroyed whatever the user had copied on every replacement in an app that
-     * ignores ACTION_SET_TEXT (Firefox, Google Keep). Restoring [lastCopiedText] instead
-     * recovers the most recent clip this service actually knows about, and only falls back
-     * to clearing when there is none.
+     * Puts the user's clipboard back after the paste fallback in [replaceText], checking the
+     * unique clip label first so anything the user copied in the meantime is never clobbered.
+     * On API 28+, clears the primary clip cleanly when [oldClip] is unavailable instead of
+     * writing an empty string or stale [lastCopiedText].
      */
-    private fun restoreClipboard(clipboard: ClipboardManager, oldClip: ClipData?, ourText: String) {
+    private fun restoreClipboard(clipboard: ClipboardManager, oldClip: ClipData?, ourClipLabel: String) {
         try {
-            val current = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-            if (current != null && current != ourText) return // user copied something newer
-            val recovered = oldClip ?: lastCopiedText?.let { ClipData.newPlainText("Mystx", it) }
-            clipboard.setPrimaryClip(recovered ?: ClipData.newPlainText("", ""))
+            val currentLabel = clipboard.primaryClipDescription?.label?.toString()
+            if (currentLabel != null && currentLabel != ourClipLabel) return // user copied something newer
+            if (oldClip != null) {
+                clipboard.setPrimaryClip(oldClip)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                clipboard.clearPrimaryClip()
+            } else {
+                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
         } catch (_: Exception) {}
     }
 
@@ -1165,12 +1277,19 @@ class AssistantService : AccessibilityService() {
         lastReplacedAt = 0L
         lastReplacedSource?.safeRecycle()
         lastReplacedSource = null
-        overlayToast.dismiss()
+        if (overlayToastInitialized) {
+            overlayToast.dismiss()
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        try { unregisterReceiver(replaceReceiver) } catch (_: Exception) {}
+        commandsPrefs?.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        studioPrefs?.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        settingsPrefs?.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        commandsPrefs = null
+        studioPrefs = null
+        settingsPrefs = null
         flushPendingClipRestore()
         isProcessing.set(false)
         lastReplacedText = null
@@ -1178,32 +1297,78 @@ class AssistantService : AccessibilityService() {
         lastReplacedSource?.safeRecycle()
         lastReplacedSource = null
         handler.removeCallbacksAndMessages(null)
-        overlayToast.dismiss()
+        if (overlayToastInitialized) {
+            overlayToast.dismiss()
+        }
         serviceScope.cancel()
     }
 
     private fun extractScreenText(root: AccessibilityNodeInfo?, skipNode: AccessibilityNodeInfo?): String {
         if (root == null) return ""
-        val sb = java.lang.StringBuilder()
-        val visited = mutableSetOf<AccessibilityNodeInfo>()
+        val rootPkg = try { root.packageName?.toString() } catch (_: Exception) { null }
+        if (isSensitivePackage(rootPkg)) {
+            if (root !== skipNode) root.safeRecycle()
+            return ""
+        }
 
-        fun traverse(node: AccessibilityNodeInfo) {
-            if (!visited.add(node)) return
-            if (node == skipNode) return
-            if (node.isVisibleToUser) {
-                val nodeText = node.text?.toString()?.trim() ?: node.contentDescription?.toString()?.trim()
-                if (!nodeText.isNullOrBlank()) {
-                    sb.append(nodeText).append("\n")
+        val sb = StringBuilder()
+        val visited = mutableSetOf<String>()
+        var remainingBudget = NODE_BUDGET
+
+        fun traverse(node: AccessibilityNodeInfo, depth: Int) {
+            try {
+                if (depth > MAX_DEPTH || remainingBudget <= 0 || sb.length >= MAX_SCREEN_TEXT_CHARS) return
+                remainingBudget--
+
+                val id = try { sourceId(node) } catch (_: Exception) { return }
+                if (!visited.add(id)) return
+
+                val isSkip = try { node === skipNode || node == skipNode } catch (_: Exception) { false }
+                if (isSkip) return
+
+                val isPassword = try { node.isPassword } catch (_: Exception) { true }
+                if (isPassword) return
+
+                val visible = try { node.isVisibleToUser } catch (_: Exception) { false }
+                if (visible) {
+                    val nodeText = try {
+                        node.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                            ?: node.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (!nodeText.isNullOrBlank()) {
+                        val remaining = MAX_SCREEN_TEXT_CHARS - sb.length
+                        if (remaining > 0) {
+                            if (sb.isNotEmpty() && remaining > 1) {
+                                sb.append('\n')
+                            }
+                            val allowed = MAX_SCREEN_TEXT_CHARS - sb.length
+                            if (allowed > 0) {
+                                sb.append(if (nodeText.length > allowed) nodeText.substring(0, allowed) else nodeText)
+                            }
+                        }
+                    }
                 }
-            }
-            for (i in 0 until node.childCount) {
-                val child = try { node.getChild(i) } catch (e: Exception) { null }
-                if (child != null) {
-                    traverse(child)
+
+                if (sb.length >= MAX_SCREEN_TEXT_CHARS || remainingBudget <= 0 || depth >= MAX_DEPTH) return
+
+                val childCount = try { node.childCount } catch (_: Exception) { 0 }
+                for (i in 0 until childCount) {
+                    if (remainingBudget <= 0 || sb.length >= MAX_SCREEN_TEXT_CHARS) break
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) {
+                        traverse(child, depth + 1)
+                    }
+                }
+            } finally {
+                if (node !== skipNode) {
+                    node.safeRecycle()
                 }
             }
         }
-        traverse(root)
-        return sb.toString().trim()
+
+        traverse(root, 0)
+        return sb.toString().trim().take(MAX_SCREEN_TEXT_CHARS)
     }
 }

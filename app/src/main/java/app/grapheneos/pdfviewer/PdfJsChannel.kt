@@ -99,8 +99,9 @@ class PdfJsChannel(private val viewModel: PdfViewModel, private val onSelectionC
 
     @JavascriptInterface
     fun getPassword(): String = viewModel.encryptedDocumentPassword
+
     @JavascriptInterface
-    fun onSelectionChanged(text: String) {
-        onSelectionChangedListener(text)
+    fun onSelectionChanged(text: String?) {
+        onSelectionChangedListener(text.orEmpty())
     }
 }

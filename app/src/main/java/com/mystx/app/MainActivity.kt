@@ -7,55 +7,45 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mystx.app.ui.CommandsScreen
-import com.mystx.app.ui.components.MystDock
-import com.mystx.app.ui.components.MystDockItem
-import com.mystx.app.ui.components.MystAuroraBackdrop
+import com.mystx.app.model.PrefKeys
 import com.mystx.app.ui.DashboardScreen
 import com.mystx.app.ui.KeysScreen
 import com.mystx.app.ui.SettingsScreen
-import com.mystx.app.ui.theme.MystxTheme
-
-import androidx.activity.compose.BackHandler
-import com.mystx.app.model.PrefKeys
-import com.mystx.app.model.RichCommand
+import com.mystx.app.ui.components.MystAuroraBackdrop
+import com.mystx.app.ui.components.MystDock
+import com.mystx.app.ui.components.MystDockItem
 import com.mystx.app.ui.studio.CommandEditorScreen
 import com.mystx.app.ui.studio.CommandStudioScreen
+import com.mystx.app.ui.theme.MystxTheme
 
 enum class Tab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
     Dashboard(R.string.dashboard_title, Icons.Default.Home),
@@ -66,39 +56,75 @@ enum class Tab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
 }
 
 class MainActivity : ComponentActivity() {
+    private var incomingPdfUri by mutableStateOf<Uri?>(null)
+
+    private fun extractPdfUri(intent: Intent?): Uri? =
+        if (intent?.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
+            intent.data
+        } else {
+            null
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        val initialPdfUri = if (intent.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
-            intent.data
-        } else null
-        
+
+        if (savedInstanceState == null) {
+            incomingPdfUri = extractPdfUri(intent)
+        }
+
         setContent {
             MystxTheme {
-                MystxMainScreen(initialPdfUri = initialPdfUri)
+                MystxMainScreen(
+                    incomingPdfUri = incomingPdfUri,
+                    onIncomingPdfConsumed = { incomingPdfUri = null }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractPdfUri(intent)?.let { incomingPdfUri = it }
     }
 }
 
 @Composable
-fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null) {
+fun MystxMainScreen(
+    vm: MystxViewModel = viewModel(),
+    incomingPdfUri: Uri? = null,
+    onIncomingPdfConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
 
     var studioSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
-    var editingCommand by remember { mutableStateOf<RichCommand?>(null) }
-    var pdfUri by remember { mutableStateOf<Uri?>(initialPdfUri) }
+    var pdfUriString by rememberSaveable { mutableStateOf<String?>(null) }
+    val pdfUri = remember(pdfUriString) { pdfUriString?.let { Uri.parse(it) } }
 
-    val isEditing = editingCommand != null || studioSubScreen?.startsWith("editor") == true
+    LaunchedEffect(incomingPdfUri) {
+        if (incomingPdfUri != null) {
+            pdfUriString = incomingPdfUri.toString()
+            onIncomingPdfConsumed()
+        }
+    }
+
+    val isEditing = studioSubScreen?.startsWith("editor") == true
+    val editingCommand = remember(studioSubScreen) {
+        val sub = studioSubScreen
+        if (sub != null && sub.startsWith("editor_") && sub != "editor_new") {
+            val id = sub.removePrefix("editor_")
+            vm.commandStudioStore.getRichCommands().firstOrNull { it.id == id }
+        } else {
+            null
+        }
+    }
 
     BackHandler(enabled = pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
         if (pdfUri != null) {
-            pdfUri = null
+            pdfUriString = null
         } else if (isEditing) {
-            editingCommand = null
             if (selectedTab == Tab.Settings) {
                 studioSubScreen = "studio_from_settings"
             } else {
@@ -144,8 +170,8 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
                     .statusBarsPadding()
             ) {
                 if (pdfUri != null) {
-                    com.mystx.app.ui.PdfReaderScreen(pdfUri = pdfUri!!) {
-                        pdfUri = null
+                    com.mystx.app.ui.PdfReaderScreen(pdfUri = pdfUri) {
+                        pdfUriString = null
                     }
                 } else when {
                     isEditing -> {
@@ -157,7 +183,6 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
                             openAIClient = vm.openAIClient,
                             prefs = vm.prefs,
                             onBack = {
-                                editingCommand = null
                                 if (selectedTab == Tab.Settings) {
                                     studioSubScreen = "studio_from_settings"
                                 } else {
@@ -171,11 +196,9 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
                             store = vm.commandStudioStore,
                             globalTemperature = vm.prefs.getFloat(PrefKeys.TEMPERATURE, 0.5f),
                             onEditCommand = { cmd ->
-                                editingCommand = cmd
                                 studioSubScreen = "editor_${cmd.id}"
                             },
                             onCreateCommand = {
-                                editingCommand = null
                                 studioSubScreen = "editor_new"
                             },
                             onBack = { studioSubScreen = null }
@@ -186,18 +209,21 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
                             store = vm.commandStudioStore,
                             globalTemperature = vm.prefs.getFloat(PrefKeys.TEMPERATURE, 0.5f),
                             onEditCommand = { cmd ->
-                                editingCommand = cmd
                                 studioSubScreen = "editor_${cmd.id}"
                             },
                             onCreateCommand = {
-                                editingCommand = null
                                 studioSubScreen = "editor_new"
                             },
                             onBack = { selectedTab = Tab.Dashboard }
                         )
                     }
                     selectedTab == Tab.Dashboard -> {
-                        DashboardScreen(vm.keyManager, vm.commandManager, vm.statsManager)
+                        DashboardScreen(
+                            keyManager = vm.keyManager,
+                            commandManager = vm.commandManager,
+                            statsManager = vm.statsManager,
+                            onOpenPdf = { uri -> pdfUriString = uri.toString() }
+                        )
                     }
                     selectedTab == Tab.History -> {
                         com.mystx.app.ui.HistoryScreen()
@@ -208,6 +234,7 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
                     selectedTab == Tab.Settings -> {
                         SettingsScreen(
                             commandManager = vm.commandManager,
+                            commandStudioStore = vm.commandStudioStore,
                             prefs = vm.prefs,
                             keyManager = vm.keyManager,
                             onNavigateToCommandStudio = { studioSubScreen = "studio_from_settings" }
@@ -218,13 +245,12 @@ fun MystxMainScreen(vm: MystxViewModel = viewModel(), initialPdfUri: Uri? = null
         }
 
         // Floating glass dock — hovers over the content, centered, above the nav bar inset.
-        if (!isEditing) {
+        if (!isEditing && pdfUri == null) {
             MystDock(
                 items = Tab.entries.map { MystDockItem(icon = it.icon, labelRes = it.titleRes) },
                 selected = selectedTab.ordinal,
                 onSelect = { index ->
                     studioSubScreen = null
-                    editingCommand = null
                     selectedTab = Tab.entries[index]
                 },
                 modifier = Modifier

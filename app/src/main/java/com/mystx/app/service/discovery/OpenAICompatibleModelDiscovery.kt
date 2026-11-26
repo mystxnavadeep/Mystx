@@ -1,9 +1,11 @@
 package com.mystx.app.service.discovery
 
+import com.mystx.app.api.ApiClientUtils
 import com.mystx.app.api.OpenAICompatibleClient
 import com.mystx.app.model.ModelInfo
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.EndpointValidator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -29,11 +31,25 @@ class OpenAICompatibleModelDiscovery(
                 return@withContext Result.failure(Exception("Endpoint must be https:// or an http:// private-LAN address"))
             }
 
-            val result = client.fetchModels(apiKey?.trim()?.takeIf { it.isNotBlank() }, cleanEndpoint)
-            result.map { ids ->
-                ids.map { id ->
-                    ModelInfo(id = id, displayName = id, provider = ProviderType.CUSTOM)
-                }
+            val cleanKey = apiKey?.replace("\r", "")?.replace("\n", "")?.trim()?.takeIf { it.isNotBlank() }
+            try {
+                val result = client.fetchModels(cleanKey, cleanEndpoint)
+                result.fold(
+                    onSuccess = { ids ->
+                        Result.success(ids.map { id ->
+                            ModelInfo(id = id, displayName = id, provider = ProviderType.CUSTOM)
+                        })
+                    },
+                    onFailure = { err ->
+                        val safeMsg = ApiClientUtils.redactSecrets(err.message ?: "Model discovery failed", cleanKey)
+                        Result.failure(Exception(safeMsg))
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Model discovery failed", cleanKey)
+                Result.failure(Exception(safeMsg))
             }
         }
 }

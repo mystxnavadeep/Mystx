@@ -10,6 +10,7 @@ class StatsManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("stats", Context.MODE_PRIVATE)
 
     companion object {
+        private val lock = Any()
         private const val KEY_TOTAL = "total_requests"
         private const val KEY_MONTHLY = "monthly_requests"
         private const val KEY_MONTH = "current_month"
@@ -36,38 +37,39 @@ class StatsManager(context: Context) {
         try { prefs.getString(key, def) } catch (_: Exception) { def }
 
     /** Call after a command is successfully processed. */
-    @Synchronized
     fun recordUsage(commandName: String) {
-        val editor = prefs.edit()
+        synchronized(lock) {
+            val editor = prefs.edit()
 
-        // Total
-        val total = safeInt(KEY_TOTAL, 0) + 1
-        editor.putInt(KEY_TOTAL, total)
+            // Total
+            val total = safeInt(KEY_TOTAL, 0) + 1
+            editor.putInt(KEY_TOTAL, total)
 
-        // Monthly — reset on rollover
-        val storedMonth = safeString(KEY_MONTH, null)
-        val month = currentMonth()
-        val monthly = if (storedMonth == month) safeInt(KEY_MONTHLY, 0) + 1 else 1
-        editor.putString(KEY_MONTH, month)
-        editor.putInt(KEY_MONTHLY, monthly)
+            // Monthly — reset on rollover
+            val storedMonth = safeString(KEY_MONTH, null)
+            val month = currentMonth()
+            val monthly = if (storedMonth == month) safeInt(KEY_MONTHLY, 0) + 1 else 1
+            editor.putString(KEY_MONTH, month)
+            editor.putInt(KEY_MONTHLY, monthly)
 
-        // Per-command counts
-        val cmdJson = readJsonObject(KEY_COMMAND_COUNTS)
-        cmdJson.put(commandName, cmdJson.optInt(commandName, 0) + 1)
-        editor.putString(KEY_COMMAND_COUNTS, cmdJson.toString())
+            // Per-command counts
+            val cmdJson = readJsonObject(KEY_COMMAND_COUNTS)
+            cmdJson.put(commandName, cmdJson.optInt(commandName, 0) + 1)
+            editor.putString(KEY_COMMAND_COUNTS, cmdJson.toString())
 
-        // Daily counts — keep last 7 days
-        val dailyJson = readJsonObject(KEY_DAILY_COUNTS)
-        val day = today()
-        dailyJson.put(day, dailyJson.optInt(day, 0) + 1)
-        // Prune old entries
-        val keys = dailyJson.keys().asSequence().sorted().toList()
-        if (keys.size > 7) {
-            keys.dropLast(7).forEach { dailyJson.remove(it) }
+            // Daily counts — keep last 7 days
+            val dailyJson = readJsonObject(KEY_DAILY_COUNTS)
+            val day = today()
+            dailyJson.put(day, dailyJson.optInt(day, 0) + 1)
+            // Prune old entries
+            val keys = dailyJson.keys().asSequence().sorted().toList()
+            if (keys.size > 7) {
+                keys.dropLast(7).forEach { dailyJson.remove(it) }
+            }
+            editor.putString(KEY_DAILY_COUNTS, dailyJson.toString())
+
+            editor.apply()
         }
-        editor.putString(KEY_DAILY_COUNTS, dailyJson.toString())
-
-        editor.apply()
     }
 
     val totalRequests: Int get() = safeInt(KEY_TOTAL, 0)

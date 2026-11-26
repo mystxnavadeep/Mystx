@@ -1,57 +1,54 @@
 package com.mystx.app.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import com.mystx.app.R
-
-import androidx.compose.ui.platform.LocalUriHandler
 import com.mystx.app.BuildConfig
-import com.mystx.app.api.UpdateChecker
-import kotlinx.coroutines.launch
-import com.mystx.app.ui.components.MystDialog
-
 import com.mystx.app.MystxApp
+import com.mystx.app.R
+import com.mystx.app.api.UpdateChecker
 import com.mystx.app.manager.CommandManager
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.manager.StatsManager
-import androidx.compose.foundation.border
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import com.mystx.app.ui.components.MystCard
+import com.mystx.app.ui.components.MystCardShape
+import com.mystx.app.ui.components.MystDialog
+import com.mystx.app.ui.components.MystDivider
 import com.mystx.app.ui.components.MystGradientButton
+import com.mystx.app.ui.components.MystPill
 import com.mystx.app.ui.components.MystStatTile
 import com.mystx.app.ui.components.MystTonalButton
-import com.mystx.app.ui.components.MystCardShape
 import com.mystx.app.ui.components.ScreenTitle
-import com.mystx.app.ui.components.MystCard
-import com.mystx.app.ui.components.MystDivider
-import com.mystx.app.ui.components.MystPill
 import com.mystx.app.ui.components.mystGradient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -108,7 +105,12 @@ private fun clearCrashMarker(context: Context) {
 }
 
 @Composable
-fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, statsManager: StatsManager) {
+fun DashboardScreen(
+    keyManager: KeyManager,
+    commandManager: CommandManager,
+    statsManager: StatsManager,
+    onOpenPdf: (Uri) -> Unit = {}
+) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var isServiceEnabled by remember { mutableStateOf(checkServiceEnabled(context)) }
@@ -125,9 +127,7 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
     var favoriteCommand by remember { mutableStateOf(statsManager.favoriteCommand) }
     var dailyCounts by remember { mutableStateOf(statsManager.dailyCounts()) }
 
-    
     var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
-    val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     var showAccessibilityDisclosure by remember { mutableStateOf(false) }
 
@@ -135,20 +135,17 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/pdf")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(intent)
+                onOpenPdf(uri)
             }
         }
     )
 
-
     LaunchedEffect(Unit) {
-        val info = UpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
-        if (info != null) {
-            updateInfo = info
+        if (BuildConfig.ENABLE_UPDATER) {
+            val info = UpdateChecker.checkForUpdates(BuildConfig.VERSION_NAME)
+            if (info != null) {
+                updateInfo = info
+            }
         }
     }
 
@@ -264,7 +261,6 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
             }
         }
 
-        
         // Open PDF Button
         MystCard {
             Row(
@@ -289,7 +285,11 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
                 MystTonalButton(
                     text = "Open",
                     onClick = {
-                        pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                        try {
+                            pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                        } catch (_: ActivityNotFoundException) {
+                        } catch (_: Exception) {
+                        }
                     }
                 )
             }
@@ -298,20 +298,23 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
         Spacer(modifier = Modifier.height(10.dp))
 
         // Interrupted-service banner: the toggle can still read "on" while the process is dead.
-        
-    updateInfo?.let { info ->
-        MystDialog(
-            title = "Update Available",
-            message = "A new version of Mystx (${info.version}) is available. Would you like to download it now?",
-            confirmLabel = "Update",
-            dismissLabel = "Later",
-            onConfirm = {
-                uriHandler.openUri(info.url)
-                updateInfo = null
-            },
-            onDismissRequest = { updateInfo = null }
-        )
-    }
+        updateInfo?.let { info ->
+            MystDialog(
+                title = "Update Available",
+                message = "A new version of Mystx (${info.version}) is available. Would you like to download it now?",
+                confirmLabel = "Update",
+                dismissLabel = "Later",
+                onConfirm = {
+                    try {
+                        uriHandler.openUri(info.url)
+                    } catch (_: ActivityNotFoundException) {
+                    } catch (_: Exception) {
+                    }
+                    updateInfo = null
+                },
+                onDismissRequest = { updateInfo = null }
+            )
+        }
 
         if (showKilledBanner) {
             MystCard {
@@ -445,7 +448,11 @@ fun DashboardScreen(keyManager: KeyManager, commandManager: CommandManager, stat
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     showAccessibilityDisclosure = false
-                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    try {
+                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    } catch (_: ActivityNotFoundException) {
+                    } catch (_: Exception) {
+                    }
                 }) {
                     androidx.compose.material3.Text(stringResource(R.string.accessibility_disclosure_agree))
                 }

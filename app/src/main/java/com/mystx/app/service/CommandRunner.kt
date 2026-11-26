@@ -9,8 +9,12 @@ import com.mystx.app.api.GeminiClient
 import com.mystx.app.api.OpenAICompatibleClient
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.PrefKeys
+import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.Providers
 import com.mystx.app.provider.Transport
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.util.Locale
 
 sealed interface CommandOutcome {
@@ -80,24 +84,36 @@ suspend fun runTextCommand(
     val tried = mutableSetOf<String>()
 
     // One attempt per configured key; getNextKey skips the ones already tried, plus any that are
-    // benched for rate limiting or known-invalid.
-    val maxAttempts = keyManager.getKeys().size.coerceAtLeast(1)
+    // benched for rate limiting or known-invalid. Keyless local Custom endpoints run once with "".
+    val configuredKeys = keyManager.getKeys()
+    val keylessCustom = provider.type == ProviderType.CUSTOM && configuredKeys.isEmpty()
+    val maxAttempts = configuredKeys.size.coerceAtLeast(1)
     while (tried.size < maxAttempts) {
-        val key = keyManager.getNextKey(tried) ?: break
+        currentCoroutineContext().ensureActive()
+        val key = if (keylessCustom) {
+            if (tried.isNotEmpty()) break
+            ""
+        } else {
+            keyManager.getNextKey(tried) ?: break
+        }
         tried.add(key)
         if (!started) {
             started = true
             onFirstAttempt()
         }
 
-        val result = when (provider.transport) {
-            Transport.OPENAI_COMPAT -> openAIClient.generate(
-                prompt, text, key, model, temperature, endpoint,
-                useJsonObjectMode = provider.useJsonObjectMode(useStructuredOutput),
-                extraParams = provider.reasoningParams(model))
-            Transport.GEMINI_NATIVE -> geminiClient.generate(
-                prompt, text, key, model, temperature, useStructuredOutput,
-                thinkingLevel = provider.thinkingLevel(model))
+        val result = try {
+            when (provider.transport) {
+                Transport.OPENAI_COMPAT -> openAIClient.generate(
+                    prompt, text, key, model, temperature, endpoint,
+                    useJsonObjectMode = provider.useJsonObjectMode(useStructuredOutput),
+                    extraParams = provider.reasoningParams(model))
+                Transport.GEMINI_NATIVE -> geminiClient.generate(
+                    prompt, text, key, model, temperature, useStructuredOutput,
+                    thinkingLevel = provider.thinkingLevel(model))
+            }
+        } catch (e: CancellationException) {
+            throw e
         }
 
         result.onSuccess { generated ->
@@ -123,7 +139,15 @@ suspend fun runTextCommand(
         when (val apiError = (error as? ApiException)?.apiError) {
             is ApiError.RateLimit -> {
                 lastErrorWasRateLimit = true
-                keyManager.reportRateLimit(key, apiError.retryAfterSeconds?.toLong() ?: 60)
+                lastErrorWasPermission = false
+                if (key.isNotEmpty()) {
+                    keyManager.reportRateLimit(key, apiError.retryAfterSeconds?.toLong() ?: 60)
+                }
+            }
+            is ApiError.RequestTooLarge -> {
+                // Per-key/org TPM budget exceeded — rotate to the next key without countdown.
+                lastErrorWasRateLimit = false
+                lastErrorWasPermission = false
             }
             is ApiError.InvalidKey -> {
                 lastErrorWasRateLimit = false
@@ -134,7 +158,7 @@ suspend fun runTextCommand(
                     lastFailedKey = null
                     lastErrorWasPermission = false
                 } else {
-                    lastFailedKey = key
+                    lastFailedKey = key.ifEmpty { null }
                     // Distinguish "this key is bad" from "this key may not use this model" (both
                     // arrive as 401/403) so the final message names the right fix.
                     val m = msg.lowercase(Locale.ROOT)
@@ -143,18 +167,20 @@ suspend fun runTextCommand(
                     // Never bench the last remaining key: with no fallback to rotate to, the
                     // 15-minute invalid mark just turned every later trigger into "all keys
                     // invalid" with no recovery path until a process restart.
-                    if (keyManager.getKeys().size > 1) {
+                    if (key.isNotEmpty() && keyManager.getKeys().size > 1) {
                         keyManager.markInvalid(key)
                     }
                 }
             }
             // 5xx — try the next key.
-            is ApiError.ServerError -> lastErrorWasRateLimit = false
-            else -> {
-                // Rotating keys cannot help: RequestTooLarge is a per-account token budget, the
-                // rest are non-retryable. Clear the flag so a 400 arriving after an earlier 429
-                // is not reported as a rate limit with a bogus countdown.
+            is ApiError.ServerError -> {
                 lastErrorWasRateLimit = false
+                lastErrorWasPermission = false
+            }
+            else -> {
+                // Non-retryable error. Clear flags so an earlier 429 or 403 does not mask it.
+                lastErrorWasRateLimit = false
+                lastErrorWasPermission = false
                 break
             }
         }

@@ -1,11 +1,15 @@
 package com.mystx.app.service.discovery
 
 import android.content.SharedPreferences
+import com.mystx.app.api.ApiClientUtils
 import com.mystx.app.model.BaiModels
 import com.mystx.app.model.GeminiModels
 import com.mystx.app.model.GroqModels
 import com.mystx.app.model.ModelInfo
 import com.mystx.app.model.ProviderType
+import kotlinx.coroutines.CancellationException
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -37,15 +41,21 @@ object ModelDiscoveryService {
 
     /**
      * Computes the SharedPreferences cache key for a given provider and endpoint.
+     * Uses SHA-256 for custom endpoints instead of 32-bit [String.hashCode] to avoid collisions.
      */
     fun getCacheKey(providerType: String, endpoint: String = ""): String {
         val sanitized = ProviderType.sanitize(providerType)
         return if (sanitized == ProviderType.CUSTOM) {
-            val normalized = endpoint.trim().trimEnd('/').lowercase()
-            "cached_models_custom_${normalized.hashCode()}"
+            val normalized = endpoint.trim().trimEnd('/').lowercase(Locale.ROOT)
+            "cached_models_custom_${sha256Hex(normalized)}"
         } else {
             "cached_models_$sanitized"
         }
+    }
+
+    private fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(Locale.ROOT, it) }
     }
 
     /**
@@ -100,7 +110,7 @@ object ModelDiscoveryService {
     }
 
     /**
-     * Queries the provider's API for available models, updates cache upon success,
+     * Queries the provider's API for available models, updates cache only upon non-empty success,
      * and returns the result.
      */
     suspend fun discoverAndCache(
@@ -112,13 +122,25 @@ object ModelDiscoveryService {
         val discovery = getDiscovery(providerType)
             ?: return Result.failure(Exception("Unsupported provider: $providerType"))
 
-        val result = discovery.discover(apiKey, endpoint)
-        result.onSuccess { models ->
-            if (models.isNotEmpty()) {
-                saveCachedModels(providerType, models, prefs, endpoint)
+        return try {
+            val result = discovery.discover(apiKey, endpoint)
+            if (result.isSuccess) {
+                val models = result.getOrNull().orEmpty()
+                if (models.isNotEmpty()) {
+                    saveCachedModels(providerType, models, prefs, endpoint)
+                }
+                result
+            } else {
+                val err = result.exceptionOrNull()
+                val safeMsg = ApiClientUtils.redactSecrets(err?.message ?: "Model discovery failed", apiKey)
+                Result.failure(Exception(safeMsg))
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val safeMsg = ApiClientUtils.redactSecrets(e.message ?: "Model discovery failed", apiKey)
+            Result.failure(Exception(safeMsg))
         }
-        return result
     }
 
     /**

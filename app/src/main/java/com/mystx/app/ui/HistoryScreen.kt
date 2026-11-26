@@ -2,7 +2,7 @@ package com.mystx.app.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -10,6 +10,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.mystx.app.model.HistoryManager
 import com.mystx.app.ui.components.MystCard
 import kotlinx.coroutines.Dispatchers
@@ -22,11 +25,14 @@ import java.util.Locale
 @Composable
 fun HistoryScreen() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var history by remember { mutableStateOf(emptyList<HistoryManager.HistoryItem>()) }
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            history = HistoryManager.getHistory(context)
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            history = withContext(Dispatchers.IO) {
+                HistoryManager.getHistory(context)
+            }
         }
     }
 
@@ -43,7 +49,7 @@ fun HistoryScreen() {
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        
+
         if (history.isEmpty()) {
             MystCard {
                 Text(
@@ -56,7 +62,7 @@ fun HistoryScreen() {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(history, key = { it.timestamp }) { item ->
+                itemsIndexed(history, key = { index, item -> "${item.timestamp}-$index" }) { _, item ->
                     HistoryItemCard(item)
                 }
             }
