@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.os.Build
 import android.icu.text.DecimalFormatSymbols
 import android.icu.text.NumberFormat
 import android.util.Log
@@ -490,7 +491,7 @@ fun PdfViewerScreen(
             else -> {
                 var webViewInitFailed by remember { mutableStateOf(false) }
                 if (webViewInitFailed) {
-                    WebViewAlert(
+                    WebViewAlertScreen(
                         message = stringResource(
                             R.string.webview_out_of_date_message,
                             webViewRelease, MIN_WEBVIEW_RELEASE
