@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -224,6 +225,36 @@ fun DashboardScreen(
                             text = stringResource(R.string.service_enable),
                             onClick = {
                                 showAccessibilityDisclosure = true
+                            }
+                        )
+                    }
+                }
+
+                if (!isServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Blocked by Restricted Settings? Tap App Info -> Allow restricted settings.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f).padding(end = 10.dp)
+                        )
+                        MystTonalButton(
+                            text = "App Info",
+                            onClick = {
+                                try {
+                                    val intent = Intent(
+                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", context.packageName, null)
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: ActivityNotFoundException) {
+                                } catch (_: Exception) {
+                                }
                             }
                         )
                     }
