@@ -26,9 +26,9 @@ import androidx.core.view.WindowCompat
 import com.mystx.app.R
 import com.mystx.app.model.PrefKeys
 
-val MystAqua = Color(0xFF0A84FF) // iOS Blue Dark
-val MystTeal = Color(0xFF007AFF) // iOS Blue secondary
-val MystAmber = Color(0xFFFF9F0A) // iOS Orange Dark
+val MystAqua = Color(0xFF2F7CF6)
+val MystTeal = Color(0xFF2563EB)
+val MystAmber = Color(0xFFF59E0B)
 
 fun mystBrandGradient() = listOf(MystAqua, MystTeal)
 
@@ -43,44 +43,44 @@ enum class MystUiStyle(
 ) {
     LIQUID_GLASS(
         key = "liquid_glass",
-        label = "Liquid Glass",
-        subtitle = "Frosted glass & aurora glow",
-        previewBg = Color(0xFF070B14),
-        previewAccent = Color(0xFF0A84FF),
-        cardCornerDp = 24
+        label = "Midnight",
+        subtitle = "Clean dark ink & crisp blue",
+        previewBg = Color(0xFF0B0D11),
+        previewAccent = Color(0xFF2F7CF6),
+        cardCornerDp = 16
+    ),
+    WARM_EDITORIAL(
+        key = "warm_editorial",
+        label = "Daylight",
+        subtitle = "Clean light paper & high contrast",
+        previewBg = Color(0xFFF5F6F8),
+        previewAccent = Color(0xFF2563EB),
+        cardCornerDp = 16,
+        isLight = true
     ),
     LINEAR_PRO(
         key = "linear_pro",
-        label = "Linear Pro",
-        subtitle = "Graphite & hairline precision",
-        previewBg = Color(0xFF0B0C0F),
+        label = "Graphite",
+        subtitle = "Matte charcoal & indigo accents",
+        previewBg = Color(0xFF0E1015),
         previewAccent = Color(0xFF6366F1),
         cardCornerDp = 12
     ),
     NOTHING_OS(
         key = "nothing_os",
-        label = "Nothing OS",
-        subtitle = "Pure OLED black & signal red",
+        label = "OLED Mono",
+        subtitle = "Pure black & signal red",
         previewBg = Color(0xFF000000),
         previewAccent = Color(0xFFD71921),
-        cardCornerDp = 16
+        cardCornerDp = 14
     ),
     MATERIAL_YOU(
         key = "material_you",
         label = "Material You",
-        subtitle = "Dynamic wallpaper squircles",
-        previewBg = Color(0xFF10201E),
-        previewAccent = Color(0xFF5EEAD4),
-        cardCornerDp = 28
-    ),
-    WARM_EDITORIAL(
-        key = "warm_editorial",
-        label = "Warm Editorial",
-        subtitle = "Alabaster paper & serif warmth",
-        previewBg = Color(0xFFF7F5F0),
-        previewAccent = Color(0xFFC25634),
-        cardCornerDp = 18,
-        isLight = true
+        subtitle = "Matches your phone wallpaper",
+        previewBg = Color(0xFF101918),
+        previewAccent = Color(0xFF2DD4BF),
+        cardCornerDp = 22
     );
 
     companion object {
@@ -100,152 +100,124 @@ val Poppins = FontFamily(
 
 private fun mystTypography(style: MystUiStyle): Typography {
     val base = Typography()
-    val headingFamily = when (style) {
-        MystUiStyle.WARM_EDITORIAL -> FontFamily.Serif
-        MystUiStyle.NOTHING_OS -> FontFamily.Monospace
-        else -> Poppins
-    }
-    val bodyFamily = when (style) {
-        MystUiStyle.NOTHING_OS -> FontFamily.Monospace
-        else -> Poppins
-    }
+    val family = if (style == MystUiStyle.NOTHING_OS) FontFamily.Monospace else Poppins
     return base.copy(
-        displayLarge = base.displayLarge.copy(fontFamily = headingFamily),
-        displayMedium = base.displayMedium.copy(fontFamily = headingFamily),
-        displaySmall = base.displaySmall.copy(fontFamily = headingFamily),
-        headlineLarge = base.headlineLarge.copy(fontFamily = headingFamily),
-        headlineMedium = base.headlineMedium.copy(fontFamily = headingFamily),
-        headlineSmall = base.headlineSmall.copy(fontFamily = headingFamily),
-        titleLarge = base.titleLarge.copy(fontFamily = headingFamily),
-        titleMedium = base.titleMedium.copy(fontFamily = headingFamily),
-        titleSmall = base.titleSmall.copy(fontFamily = bodyFamily),
-        bodyLarge = base.bodyLarge.copy(fontFamily = bodyFamily),
-        bodyMedium = base.bodyMedium.copy(fontFamily = bodyFamily),
-        bodySmall = base.bodySmall.copy(fontFamily = bodyFamily),
-        labelLarge = base.labelLarge.copy(fontFamily = bodyFamily),
-        labelMedium = base.labelMedium.copy(fontFamily = bodyFamily),
-        labelSmall = base.labelSmall.copy(fontFamily = bodyFamily)
+        displayLarge = base.displayLarge.copy(fontFamily = family),
+        displayMedium = base.displayMedium.copy(fontFamily = family),
+        displaySmall = base.displaySmall.copy(fontFamily = family),
+        headlineLarge = base.headlineLarge.copy(fontFamily = family),
+        headlineMedium = base.headlineMedium.copy(fontFamily = family),
+        headlineSmall = base.headlineSmall.copy(fontFamily = family),
+        titleLarge = base.titleLarge.copy(fontFamily = family),
+        titleMedium = base.titleMedium.copy(fontFamily = family),
+        titleSmall = base.titleSmall.copy(fontFamily = family),
+        bodyLarge = base.bodyLarge.copy(fontFamily = family),
+        bodyMedium = base.bodyMedium.copy(fontFamily = family),
+        bodySmall = base.bodySmall.copy(fontFamily = family),
+        labelLarge = base.labelLarge.copy(fontFamily = family),
+        labelMedium = base.labelMedium.copy(fontFamily = family),
+        labelSmall = base.labelSmall.copy(fontFamily = family)
     )
 }
 
-private val LiquidGlassColorScheme = darkColorScheme(
-    background = Color(0xFF000000),
-    surface = Color(0x33FFFFFF),
-    surfaceVariant = Color(0x26FFFFFF),
-    surfaceContainerHigh = Color(0x40FFFFFF),
-    onBackground = Color(0xFFFFFFFF),
-    onSurface = Color(0xFFFFFFFF),
-    onSurfaceVariant = Color(0x99EBEBF5),
-    outline = Color(0x33FFFFFF),
-    primary = Color(0xFF0A84FF),
+private val MidnightColorScheme = darkColorScheme(
+    background = Color(0xFF0B0D11),
+    surface = Color(0xFF14171F),
+    surfaceVariant = Color(0xFF1C202B),
+    surfaceContainerHigh = Color(0xFF222734),
+    onBackground = Color(0xFFF8FAFC),
+    onSurface = Color(0xFFF8FAFC),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = Color(0xFF262B38),
+    primary = Color(0xFF2F7CF6),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF004080),
-    onPrimaryContainer = Color(0xFFE5F1FF),
-    secondary = Color(0xFF30D158),
-    tertiary = Color(0xFFFF9F0A),
-    tertiaryContainer = Color(0xFF4D2F00),
-    error = Color(0xFFFF453A),
-    errorContainer = Color(0xFF4D1511)
+    primaryContainer = Color(0xFF162C52),
+    onPrimaryContainer = Color(0xFFDBEAFE),
+    secondary = Color(0xFF22C55E),
+    tertiary = Color(0xFF22C55E),
+    tertiaryContainer = Color(0xFF123524),
+    error = Color(0xFFEF4444),
+    errorContainer = Color(0xFF451A1A)
 )
 
-private val LinearProColorScheme = darkColorScheme(
-    background = Color(0xFF0B0C0F),
-    surface = Color(0xFF13151B),
-    surfaceVariant = Color(0xFF1B1E27),
-    surfaceContainerHigh = Color(0xFF202430),
+private val DaylightColorScheme = lightColorScheme(
+    background = Color(0xFFF5F6F8),
+    surface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF0F2F5),
+    surfaceContainerHigh = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF0F172A),
+    onSurface = Color(0xFF0F172A),
+    onSurfaceVariant = Color(0xFF64748B),
+    outline = Color(0xFFE2E6ED),
+    primary = Color(0xFF2563EB),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFDBEAFE),
+    onPrimaryContainer = Color(0xFF1E3A8A),
+    secondary = Color(0xFF16A34A),
+    tertiary = Color(0xFF16A34A),
+    tertiaryContainer = Color(0xFFDCFCE7),
+    error = Color(0xFFDC2626),
+    errorContainer = Color(0xFFFEE2E2)
+)
+
+private val GraphiteColorScheme = darkColorScheme(
+    background = Color(0xFF0E1015),
+    surface = Color(0xFF161922),
+    surfaceVariant = Color(0xFF1F2330),
+    surfaceContainerHigh = Color(0xFF262B3B),
     onBackground = Color(0xFFF3F4F6),
     onSurface = Color(0xFFF3F4F6),
     onSurfaceVariant = Color(0xFF9CA3AF),
-    outline = Color(0xFF282C38),
+    outline = Color(0xFF2B3040),
     primary = Color(0xFF6366F1),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF23254D),
+    primaryContainer = Color(0xFF242654),
     onPrimaryContainer = Color(0xFFE0E7FF),
-    secondary = Color(0xFF34D399),
-    tertiary = Color(0xFF38BDF8),
-    tertiaryContainer = Color(0xFF0C2D48),
+    secondary = Color(0xFF10B981),
+    tertiary = Color(0xFF10B981),
+    tertiaryContainer = Color(0xFF0F352A),
     error = Color(0xFFF87171),
     errorContainer = Color(0xFF451A1A)
 )
 
-private val NothingOsColorScheme = darkColorScheme(
+private val OledMonoColorScheme = darkColorScheme(
     background = Color(0xFF000000),
-    surface = Color(0xFF090909),
-    surfaceVariant = Color(0xFF141414),
-    surfaceContainerHigh = Color(0xFF1C1C1C),
+    surface = Color(0xFF0C0C0E),
+    surfaceVariant = Color(0xFF16161A),
+    surfaceContainerHigh = Color(0xFF1E1E24),
     onBackground = Color(0xFFFFFFFF),
     onSurface = Color(0xFFFFFFFF),
-    onSurfaceVariant = Color(0xFFB3B3B3),
-    outline = Color(0x66FFFFFF),
+    onSurfaceVariant = Color(0xFFA1A1AA),
+    outline = Color(0xFF2E2E36),
     primary = Color(0xFFD71921),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF3B090C),
+    primaryContainer = Color(0xFF3D0C0F),
     onPrimaryContainer = Color(0xFFFFDAD9),
-    secondary = Color(0xFFFFFFFF),
-    tertiary = Color(0xFFD71921),
-    tertiaryContainer = Color(0xFF2A090B),
+    secondary = Color(0xFF22C55E),
+    tertiary = Color(0xFF22C55E),
+    tertiaryContainer = Color(0xFF123524),
     error = Color(0xFFFF453A),
     errorContainer = Color(0xFF4D1511)
 )
 
 private val MaterialYouFallbackColorScheme = darkColorScheme(
     background = Color(0xFF0E1716),
-    surface = Color(0xFF172624),
-    surfaceVariant = Color(0xFF213532),
-    surfaceContainerHigh = Color(0xFF28403D),
+    surface = Color(0xFF152220),
+    surfaceVariant = Color(0xFF1E2F2D),
+    surfaceContainerHigh = Color(0xFF253A37),
     onBackground = Color(0xFFE2F1EE),
     onSurface = Color(0xFFE2F1EE),
-    onSurfaceVariant = Color(0xFFA7C4BF),
-    outline = Color(0xFF3D5A55),
-    primary = Color(0xFF5EEAD4),
-    onPrimary = Color(0xFF003731),
-    primaryContainer = Color(0xFF005048),
-    onPrimaryContainer = Color(0xFF99F6E4),
-    secondary = Color(0xFF99F6E4),
-    tertiary = Color(0xFF86EFAC),
+    onSurfaceVariant = Color(0xFF9FBAB5),
+    outline = Color(0xFF2F4743),
+    primary = Color(0xFF2DD4BF),
+    onPrimary = Color(0xFF042F2E),
+    primaryContainer = Color(0xFF115E59),
+    onPrimaryContainer = Color(0xFFCCFBF1),
+    secondary = Color(0xFF4ADE80),
+    tertiary = Color(0xFF4ADE80),
     tertiaryContainer = Color(0xFF144226),
     error = Color(0xFFFFB4AB),
     errorContainer = Color(0xFF690005)
-)
-
-private val WarmEditorialColorScheme = lightColorScheme(
-    background = Color(0xFFF7F5F0),
-    surface = Color(0xFFFFFDF9),
-    surfaceVariant = Color(0xFFEDE8DF),
-    surfaceContainerHigh = Color(0xFFE6DFD3),
-    onBackground = Color(0xFF1C1917),
-    onSurface = Color(0xFF1C1917),
-    onSurfaceVariant = Color(0xFF57534E),
-    outline = Color(0xFFD6CEC2),
-    primary = Color(0xFFC25634),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFFCE7DF),
-    onPrimaryContainer = Color(0xFF5E210F),
-    secondary = Color(0xFF3F6B57),
-    tertiary = Color(0xFF3F6B57),
-    tertiaryContainer = Color(0xFFDCEEE5),
-    error = Color(0xFFB91C1C),
-    errorContainer = Color(0xFFFEE2E2)
-)
-
-private val IosLightColorScheme = lightColorScheme(
-    background = Color(0xFFF2F2F7),
-    surface = Color(0xB3FFFFFF),
-    surfaceVariant = Color(0x80FFFFFF),
-    surfaceContainerHigh = Color(0xE6FFFFFF),
-    onBackground = Color(0xFF000000),
-    onSurface = Color(0xFF000000),
-    onSurfaceVariant = Color(0xFF3C3C43).copy(alpha = 0.6f),
-    outline = Color(0x33000000),
-    primary = Color(0xFF007AFF),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFE5F1FF),
-    onPrimaryContainer = Color(0xFF004080),
-    secondary = Color(0xFF34C759),
-    tertiary = Color(0xFFFF9500),
-    tertiaryContainer = Color(0xFFFFEAD1),
-    error = Color(0xFFFF3B30),
-    errorContainer = Color(0xFFFFD8D6)
 )
 
 private tailrec fun Context.findActivityForTheme(): Activity? = when (this) {
@@ -267,12 +239,13 @@ fun MystxTheme(
     }
 
     val colorScheme: ColorScheme = if (forceLight) {
-        IosLightColorScheme
+        DaylightColorScheme
     } else {
         when (resolvedStyle) {
-            MystUiStyle.LIQUID_GLASS -> LiquidGlassColorScheme
-            MystUiStyle.LINEAR_PRO -> LinearProColorScheme
-            MystUiStyle.NOTHING_OS -> NothingOsColorScheme
+            MystUiStyle.LIQUID_GLASS -> MidnightColorScheme
+            MystUiStyle.WARM_EDITORIAL -> DaylightColorScheme
+            MystUiStyle.LINEAR_PRO -> GraphiteColorScheme
+            MystUiStyle.NOTHING_OS -> OledMonoColorScheme
             MystUiStyle.MATERIAL_YOU -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     dynamicDarkColorScheme(context)
@@ -280,7 +253,6 @@ fun MystxTheme(
                     MaterialYouFallbackColorScheme
                 }
             }
-            MystUiStyle.WARM_EDITORIAL -> WarmEditorialColorScheme
         }
     }
 

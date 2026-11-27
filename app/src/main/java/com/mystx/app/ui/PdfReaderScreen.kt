@@ -6,6 +6,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -94,7 +96,7 @@ fun PdfReaderScreen(
                     isExplainButtonVisible = false
                     isPopupVisible = true
                 },
-                icon = { Text("✨") },
+                icon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = "Explain") },
                 text = { Text("Mystx Explain", fontWeight = FontWeight.Bold) },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer

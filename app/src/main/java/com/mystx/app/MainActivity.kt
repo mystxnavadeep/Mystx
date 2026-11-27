@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mystx.app.manager.AuthManager
 import com.mystx.app.model.PrefKeys
+import com.mystx.app.ui.AppGuideScreen
 import com.mystx.app.ui.AuthScreen
 import com.mystx.app.ui.billing.AdUnlockActivity
 import com.mystx.app.ui.billing.ProUpgradeScreen
@@ -147,6 +148,7 @@ fun MystxMainScreen(
 
     var studioSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var showProScreen by rememberSaveable { mutableStateOf(false) }
+    var showGuideScreen by rememberSaveable { mutableStateOf(false) }
     var pdfUriString by rememberSaveable { mutableStateOf<String?>(null) }
     val pdfUri = remember(pdfUriString) { pdfUriString?.let { Uri.parse(it) } }
 
@@ -175,7 +177,7 @@ fun MystxMainScreen(
         }
     }
 
-    BackHandler(enabled = showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
+    BackHandler(enabled = showGuideScreen || showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
         if (pdfUri != null) {
             pdfUriString = null
         } else if (isEditing) {
@@ -216,7 +218,20 @@ fun MystxMainScreen(
         MystAuroraBackdrop()
         Scaffold(
             containerColor = Color.Transparent,
-            contentWindowInsets = WindowInsets(0.dp)
+            contentWindowInsets = WindowInsets(0.dp),
+            bottomBar = {
+                if (!isEditing && pdfUri == null && !showProScreen && !showGuideScreen) {
+                    MystDock(
+                        items = Tab.entries.map { MystDockItem(icon = it.icon, labelRes = it.titleRes) },
+                        selected = selectedTab.ordinal,
+                        onSelect = { index ->
+                            studioSubScreen = null
+                            selectedTab = Tab.entries[index]
+                        },
+                        modifier = Modifier.navigationBarsPadding()
+                    )
+                }
+            }
         ) { innerPadding ->
             Box(
                 modifier = Modifier
@@ -224,7 +239,9 @@ fun MystxMainScreen(
                     .statusBarsPadding()
                     .imePadding()
             ) {
-                if (showProScreen) {
+                if (showGuideScreen) {
+                    AppGuideScreen(onBack = { showGuideScreen = false })
+                } else if (showProScreen) {
                     ProUpgradeScreen(
                         onBack = { showProScreen = false },
                         onRequireSignIn = {
@@ -287,7 +304,8 @@ fun MystxMainScreen(
                             commandManager = vm.commandManager,
                             statsManager = vm.statsManager,
                             onOpenPdf = { uri -> pdfUriString = uri.toString() },
-                            onOpenPro = { showProScreen = true }
+                            onOpenPro = { showProScreen = true },
+                            onOpenGuide = { showGuideScreen = true }
                         )
                     }
                     selectedTab == Tab.History -> {
@@ -304,6 +322,7 @@ fun MystxMainScreen(
                             keyManager = vm.keyManager,
                             onNavigateToCommandStudio = { studioSubScreen = "studio_from_settings" },
                             onOpenPro = { showProScreen = true },
+                            onOpenGuide = { showGuideScreen = true },
                             onOpenAuth = {
                                 vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
                                 showAuthScreen = true
@@ -314,21 +333,6 @@ fun MystxMainScreen(
             }
         }
 
-        // Floating glass dock — hovers over the content, centered, above the nav bar inset.
-        if (!isEditing && pdfUri == null && !showProScreen) {
-            MystDock(
-                items = Tab.entries.map { MystDockItem(icon = it.icon, labelRes = it.titleRes) },
-                selected = selectedTab.ordinal,
-                onSelect = { index ->
-                    studioSubScreen = null
-                    selectedTab = Tab.entries[index]
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 14.dp)
-                    .widthIn(max = 420.dp)
-            )
-        }
+
     }
 }

@@ -89,10 +89,7 @@ val MystDropdownShape = RoundedCornerShape(14.dp)
  * stay readable against the dark glass theme.
  */
 @Composable
-fun mystDropdownContainerColor(): Color {
-    val isDarkScheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    return if (isDarkScheme) Color(0xF80B1C24) else Color(0xF8FFFFFF)
-}
+fun mystDropdownContainerColor(): Color = MaterialTheme.colorScheme.surfaceContainerHigh
 
 /** The brand gradient, left to right: cyan -> teal. */
 fun mystGradient(): Brush = Brush.horizontalGradient(mystBrandGradient())
@@ -115,15 +112,14 @@ fun MystCard(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = cardShape,
-        color = MaterialTheme.colorScheme.surface,      // translucent glass fill
+        color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
-        shadowElevation = 10.dp,
+        shadowElevation = 0.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(
             modifier = Modifier
-                .background(glassSheen())
-                .padding(18.dp)
+                .padding(16.dp)
                 .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier),
             content = content
         )
@@ -132,25 +128,14 @@ fun MystCard(
 
 @Composable
 fun ScreenTitle(title: String) {
-    Column {
-        // Brand eyebrow: the product name in tracked-out micro caps.
-        Text(
-            text = stringResource(R.string.app_name).uppercase(),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 4.sp,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        Text(
-            text = title,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.ExtraBold,
-            lineHeight = 34.sp,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(bottom = 18.dp)
-        )
-    }
+    Text(
+        text = title,
+        fontSize = 26.sp,
+        fontWeight = FontWeight.Bold,
+        lineHeight = 32.sp,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+    )
 }
 
 @Composable
@@ -178,7 +163,7 @@ fun MystTextField(
         modifier = modifier.fillMaxWidth().heightIn(min = 56.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -507,61 +492,66 @@ fun MystDock(
 ) {
     val haptic = LocalHapticFeedback.current
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(30.dp),
+        modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 16.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            items.forEachIndexed { index, item ->
-                val isSelected = selected == index
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1f else 0.95f,
-                    animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                    label = "dockScale"
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(
-                            if (isSelected) mystGradient()
-                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-                        )
-                        .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onSelect(index)
-                        }
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .padding(horizontal = if (isSelected) 18.dp else 14.dp, vertical = 12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            item.icon,
-                            contentDescription = stringResource(item.labelRes),
-                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                                   else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = isSelected,
-                            enter = expandHorizontally() + fadeIn(),
-                            exit = shrinkHorizontally() + fadeOut()
+        Column(modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items.forEachIndexed { index, item ->
+                    val isSelected = selected == index
+                    val contentColor = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onSelect(index)
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                    else Color.Transparent
+                                )
+                                .padding(horizontal = 14.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = stringResource(item.labelRes),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(start = 8.dp)
+                            Icon(
+                                item.icon,
+                                contentDescription = stringResource(item.labelRes),
+                                tint = contentColor,
+                                modifier = Modifier.size(21.dp)
                             )
                         }
+                        Text(
+                            text = stringResource(item.labelRes),
+                            color = contentColor,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1
+                        )
                     }
                 }
             }

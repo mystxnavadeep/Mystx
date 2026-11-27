@@ -92,7 +92,7 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer { } // Creates a hardware layer for smooth NavHost slide animations
-            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 150.dp)
+            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 28.dp)
     ) {
         ScreenTitle(stringResource(R.string.keys_title))
 

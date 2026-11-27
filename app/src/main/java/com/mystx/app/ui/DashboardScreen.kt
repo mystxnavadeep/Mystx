@@ -112,7 +112,8 @@ fun DashboardScreen(
     commandManager: CommandManager,
     statsManager: StatsManager,
     onOpenPdf: (Uri) -> Unit = {},
-    onOpenPro: () -> Unit = {}
+    onOpenPro: () -> Unit = {},
+    onOpenGuide: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -188,9 +189,19 @@ fun DashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 150.dp)
+            .padding(horizontal = 18.dp).padding(top = 12.dp, bottom = 28.dp)
     ) {
-        ScreenTitle(stringResource(R.string.dashboard_title))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ScreenTitle(stringResource(R.string.dashboard_title))
+            MystTonalButton(
+                text = "Guide",
+                onClick = onOpenGuide
+            )
+        }
 
         // Hero status panel — gradient border ring, floating enable action.
         Box(

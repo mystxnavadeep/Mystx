@@ -70,6 +70,7 @@ fun SettingsScreen(
     keyManager: KeyManager,
     onNavigateToCommandStudio: () -> Unit = {},
     onOpenPro: () -> Unit = {},
+    onOpenGuide: () -> Unit = {},
     onOpenAuth: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -253,7 +254,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 150.dp)
+            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 28.dp)
     ) {
         ScreenTitle(stringResource(R.string.settings_title))
 
@@ -1014,14 +1015,24 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Card 4: About — version, Instagram. No GitHub link in the UI.
+        // About — Version, App Guide, Instagram (no GitHub repo link)
         MystCard {
-            Text(
-                text = stringResource(R.string.app_name) + " v" + BuildConfig.VERSION_NAME,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.app_name) + " v" + BuildConfig.VERSION_NAME,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                MystTonalButton(
+                    text = "App Guide",
+                    onClick = onOpenGuide
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
             MystDivider()
             Spacer(modifier = Modifier.height(12.dp))
