@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "213603859509",
+    "project_id": "mystx-by-navadeep",
+    "storage_bucket": "mystx-by-navadeep.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:213603859509:android:c3825eaac9a523a694457c",
+        "android_client_info": {
+          "package_name": "com.mystx.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "213603859509-ns133in3u84ba7oov45ui7invobn4sqf.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mystx.app",
+            "certificate_hash": "548a60a79c069cedf2782df31527da05fabeaca4"
+          }
+        },
+        {
+          "client_id": "213603859509-l0dv8itn077sq0eqp8p03hp7mlj5k7ft.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDexQIQ77EhwjvSLH0JYaFkX25n5Hc2VW0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "213603859509-l0dv8itn077sq0eqp8p03hp7mlj5k7ft.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

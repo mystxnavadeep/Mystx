@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 val baseVersion = "2.0"
@@ -159,9 +160,4 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation("androidx.test:core-ktx:1.7.0")
-}
-
-
-if (file("google-services.json").exists()) {
-    apply(plugin = "com.google.gms.google-services")
 }
