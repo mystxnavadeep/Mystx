@@ -58,7 +58,7 @@ class AdUnlockActivity : ComponentActivity() {
 
         // Pre-initialize Unity Ads in background so ads load faster when tapped
         try {
-            if (!UnityAds.isInitialized()) {
+            if (!UnityAds.isInitialized) {
                 UnityAds.initialize(
                     applicationContext,
                     BuildConfig.UNITY_GAME_ID,
@@ -134,7 +134,7 @@ class AdUnlockActivity : ComponentActivity() {
         }
 
         try {
-            if (UnityAds.isInitialized()) {
+            if (UnityAds.isInitialized) {
                 loadAndShow()
             } else {
                 UnityAds.initialize(
