@@ -1,0 +1,2 @@
+- fix(ads): access UnityAds.isInitialized as Kotlin property
+- feat: add Unity Ads 6-hour pass, Direct UPI Pro plans, and draggable autocomplete bar
