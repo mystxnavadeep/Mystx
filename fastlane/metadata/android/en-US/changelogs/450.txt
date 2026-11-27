@@ -1,0 +1,1 @@
+- fix(firebase): bundle google-services.json and preserve Firebase resources in release APK
