@@ -1,0 +1,1 @@
+- feat(ui): clean UI redesign, bottom Scaffold dock, updated themes & AppGuideScreen
