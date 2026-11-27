@@ -17,6 +17,12 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionName") as String?) ?: "$baseVersion-dev"
         buildConfigField("boolean", "ENABLE_UPDATER", (project.findProperty("playStore") == null).toString())
+        val unityGameId = ((project.findProperty("unityGameId") as String?) ?: System.getenv("UNITY_GAME_ID") ?: "").ifBlank { "800455865" }.replace("\"", "")
+        val unityPlacement = ((project.findProperty("unityRewardedPlacement") as String?) ?: System.getenv("UNITY_REWARDED_PLACEMENT") ?: "").ifBlank { "BP_Rewarded_Android" }.replace("\"", "")
+        val unityTestMode = ((project.findProperty("unityTestMode") as String?) ?: System.getenv("UNITY_TEST_MODE") ?: "false").equals("true", ignoreCase = true)
+        buildConfigField("String", "UNITY_GAME_ID", "\"$unityGameId\"")
+        buildConfigField("String", "UNITY_REWARDED_PLACEMENT", "\"$unityPlacement\"")
+        buildConfigField("boolean", "UNITY_TEST_MODE", unityTestMode.toString())
 
         // Ship exactly the locales that exist in res/, and nothing else.
         //
@@ -156,8 +162,11 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("com.unity3d.ads:unity-ads:4.16.2")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation("androidx.test:core-ktx:1.7.0")
 }
+
+

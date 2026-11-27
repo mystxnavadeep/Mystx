@@ -69,6 +69,7 @@ fun SettingsScreen(
     prefs: SharedPreferences,
     keyManager: KeyManager,
     onNavigateToCommandStudio: () -> Unit = {},
+    onOpenPro: () -> Unit = {},
     onOpenAuth: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -305,6 +306,14 @@ fun SettingsScreen(
                         onClick = onOpenAuth
                     )
                 }
+            }
+            if (acc == null || !acc.isProActive) {
+                Spacer(modifier = Modifier.height(10.dp))
+                MystGradientButton(
+                    text = "Upgrade to Mystx Pro · ₹40/mo or ₹200/yr",
+                    onClick = onOpenPro,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 

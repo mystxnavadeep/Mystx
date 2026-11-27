@@ -38,6 +38,7 @@ import com.mystx.app.BuildConfig
 import com.mystx.app.MystxApp
 import com.mystx.app.R
 import com.mystx.app.api.UpdateChecker
+import com.mystx.app.manager.AccessGateManager
 import com.mystx.app.manager.CommandManager
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.manager.StatsManager
@@ -110,7 +111,8 @@ fun DashboardScreen(
     keyManager: KeyManager,
     commandManager: CommandManager,
     statsManager: StatsManager,
-    onOpenPdf: (Uri) -> Unit = {}
+    onOpenPdf: (Uri) -> Unit = {},
+    onOpenPro: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -291,6 +293,54 @@ fun DashboardScreen(
                 }
             }
         }
+
+        // Mystx Pro & 6-Hour Ad Pass Banner
+        val isProUser = AccessGateManager.isPro(context)
+        val passRemaining = AccessGateManager.remainingPassFormatted(context)
+        MystCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Text(
+                        text = if (isProUser) "Mystx Pro Active" else "AI Access · 6h Free / Pro",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = when {
+                            isProUser -> "Unlimited ad-free AI unlocked"
+                            passRemaining != null -> "Free 6h pass active · $passRemaining"
+                            else -> "Watch 1 video for 6h AI · or Go Pro (₹40/mo)"
+                        },
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (!isProUser) {
+                    MystGradientButton(
+                        text = "Go Pro",
+                        onClick = onOpenPro
+                    )
+                } else {
+                    MystPill(text = "PRO")
+                }
+            }
+            if (!isProUser) {
+                Spacer(modifier = Modifier.height(10.dp))
+                MystTonalButton(
+                    text = if (passRemaining != null) "Extend 6h Pass (Watch Video)" else "Watch Video · Unlock 6 Hours Free",
+                    onClick = { AccessGateManager.launchUnlockPrompt(context) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Open PDF Button
         MystCard {

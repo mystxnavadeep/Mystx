@@ -5,10 +5,12 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.view.Gravity
 import android.view.MotionEvent
@@ -25,9 +27,11 @@ import com.mystx.app.model.Command
 
 /**
  * Floating glass command autocomplete bar rendered as a TYPE_ACCESSIBILITY_OVERLAY.
- * Anchors cleanly above the active text input box (never overlapping the keyboard),
- * clips scrolling pills strictly inside its rounded glass capsule, and animates
- * smoothly on show, in-place filter updates, pill press, and dismiss.
+ * - Works smoothly on phones, tablets, and foldables (capped width + smooth horizontal scroll).
+ * - Includes a left drag grip (⋮) so users can reposition the bar anywhere on screen,
+ *   and a right close button (✕) + outside-touch auto-dismiss so it never gets stuck.
+ * - Uses native RippleDrawable on pills instead of OnTouchListener so HorizontalScrollView
+ *   never loses scroll gestures.
  * All methods must be called on the main thread.
  */
 class CommandAutocompleteOverlay(
@@ -42,6 +46,7 @@ class CommandAutocompleteOverlay(
     private var enterAnimator: AnimatorSet? = null
     private var exitAnimator: AnimatorSet? = null
     private var autoHideRunnable: Runnable? = null
+    private var userDraggedPosition: Pair<Int, Int>? = null
 
     private fun dp(value: Int): Int {
         val density = context.resources.displayMetrics.density
@@ -65,6 +70,16 @@ class CommandAutocompleteOverlay(
     ) {
         pillRow.removeAllViews()
         commands.forEachIndexed { index, command ->
+            val shape = GradientDrawable().apply {
+                setColor(PILL_BG_COLOR)
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), PILL_STROKE_COLOR)
+            }
+            val rippleBg = RippleDrawable(
+                ColorStateList.valueOf(0x40FFFFFF),
+                shape,
+                null
+            )
             val pill = TextView(context).apply {
                 text = command.trigger
                 setTextColor(Color.WHITE)
@@ -72,23 +87,8 @@ class CommandAutocompleteOverlay(
                 setTypeface(typeface, Typeface.BOLD)
                 maxLines = 1
                 setPadding(dp(13), dp(7), dp(13), dp(7))
-                background = GradientDrawable().apply {
-                    setColor(PILL_BG_COLOR)
-                    cornerRadius = dp(18).toFloat()
-                    setStroke(dp(1), PILL_STROKE_COLOR)
-                }
+                background = rippleBg
                 isClickable = true
-                setOnTouchListener { v, event ->
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(80L).start()
-                        }
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            v.animate().scaleX(1f).scaleY(1f).setDuration(110L).start()
-                        }
-                    }
-                    false
-                }
                 setOnClickListener {
                     dismissAnimated()
                     onSelect(command)
@@ -107,8 +107,8 @@ class CommandAutocompleteOverlay(
     }
 
     private fun computeLayoutParams(anchorTopPx: Int?): WindowManager.LayoutParams {
-        val displayMetrics = context.resources.displayMetrics
-        val maxBarWidth = (displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(200))
+        val dm = context.resources.displayMetrics
+        val maxBarWidth = minOf(dm.widthPixels - dp(24), dp(460)).coerceAtLeast(dp(220))
         val estimatedBarHeight = dp(52)
 
         return WindowManager.LayoutParams(
@@ -116,16 +116,23 @@ class CommandAutocompleteOverlay(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            if (anchorTopPx != null && anchorTopPx > dp(80)) {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            val savedPos = userDraggedPosition
+            if (savedPos != null) {
+                gravity = Gravity.TOP or Gravity.START
+                x = savedPos.first.coerceIn(dp(8), (dm.widthPixels - maxBarWidth - dp(8)).coerceAtLeast(dp(8)))
+                y = savedPos.second.coerceIn(dp(40), (dm.heightPixels - estimatedBarHeight - dp(40)).coerceAtLeast(dp(40)))
+            } else if (anchorTopPx != null && anchorTopPx > dp(80)) {
+                gravity = Gravity.TOP or Gravity.START
+                x = ((dm.widthPixels - maxBarWidth) / 2).coerceAtLeast(dp(12))
                 y = (anchorTopPx - estimatedBarHeight - dp(10)).coerceAtLeast(dp(48))
             } else {
-                // Fallback safely above standard OEM keyboards if node bounds are unavailable.
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                y = dp(330)
+                gravity = Gravity.TOP or Gravity.START
+                x = ((dm.widthPixels - maxBarWidth) / 2).coerceAtLeast(dp(12))
+                y = (dm.heightPixels - dp(360)).coerceAtLeast(dp(80))
             }
             windowAnimations = 0
         }
@@ -133,7 +140,7 @@ class CommandAutocompleteOverlay(
 
     /**
      * Show up to 6 matching command triggers as tappable rounded glass pills inside
-     * a cleanly clipped floating capsule. Updates in-place without flickering if already shown.
+     * a draggable, smoothly scrollable floating capsule.
      */
     fun show(
         commands: List<Command>,
@@ -148,43 +155,43 @@ class CommandAutocompleteOverlay(
 
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
 
-        // Reset auto-hide timer on every update
         autoHideRunnable?.let { handler.removeCallbacks(it) }
         val hideTask = Runnable { dismissAnimated() }
         autoHideRunnable = hideTask
         handler.postDelayed(hideTask, AUTO_DISMISS_MS)
 
-        // If already visible and attached, update pills & position smoothly in-place (zero flicker)
+        // Update in-place without recreating window if already visible
         val existingContainer = currentContainer
         val existingRow = currentPillRow
         if (existingContainer != null && existingRow != null && existingContainer.isAttachedToWindow) {
             populatePills(existingRow, limited, onSelect)
-            val newParams = computeLayoutParams(anchorTopPx)
-            val oldParams = currentParams
-            if (oldParams == null || oldParams.gravity != newParams.gravity || kotlin.math.abs(oldParams.y - newParams.y) > dp(6)) {
-                currentParams = newParams
-                try {
-                    wm.updateViewLayout(existingContainer, newParams)
-                } catch (_: Exception) {}
+            if (userDraggedPosition == null) {
+                val newParams = computeLayoutParams(anchorTopPx)
+                val oldParams = currentParams
+                if (oldParams == null || kotlin.math.abs(oldParams.y - newParams.y) > dp(8)) {
+                    currentParams = newParams
+                    try {
+                        wm.updateViewLayout(existingContainer, newParams)
+                    } catch (_: Exception) {}
+                }
             }
             return
         }
 
-        // Clean up any stale view before creating a fresh animated capsule
         dismiss()
 
         val pillRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(7), dp(10), dp(7))
+            setPadding(dp(4), dp(6), dp(4), dp(6))
         }
         populatePills(pillRow, limited, onSelect)
 
         val scrollView = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
+            overScrollMode = View.OVER_SCROLL_ALWAYS
             isFillViewport = false
-            clipToPadding = true
+            isSmoothScrollingEnabled = true
             addView(
                 pillRow,
                 FrameLayout.LayoutParams(
@@ -194,8 +201,67 @@ class CommandAutocompleteOverlay(
             )
         }
 
-        // Outer glass capsule strictly clips all child pills to its rounded outline
-        val capsule = FrameLayout(context).apply {
+        val params = computeLayoutParams(anchorTopPx)
+
+        // Left drag handle so users can freely move the bar on phones & tablets
+        var dragStartX = 0
+        var dragStartY = 0
+        var touchStartRawX = 0f
+        var touchStartRawY = 0f
+
+        val dragHandle = TextView(context).apply {
+            text = "⋮"
+            setTextColor(0xB3FFFFFF.toInt())
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(6), dp(6))
+            contentDescription = "Drag command bar"
+        }
+
+        // Right close button so the bar can always be dismissed cleanly
+        val closeButton = TextView(context).apply {
+            text = "✕"
+            setTextColor(0xB3FFFFFF.toInt())
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(6), dp(11), dp(6))
+            isClickable = true
+            setOnClickListener { dismissAnimated() }
+            contentDescription = "Close command bar"
+        }
+
+        val barRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                dragHandle,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+            addView(
+                scrollView,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(
+                closeButton,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        val capsule = object : FrameLayout(context) {
+            override fun onTouchEvent(event: MotionEvent?): Boolean {
+                if (event?.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                    dismissAnimated()
+                    return true
+                }
+                return super.onTouchEvent(event)
+            }
+        }.apply {
             background = GradientDrawable().apply {
                 setColor(CONTAINER_BG_COLOR)
                 cornerRadius = dp(24).toFloat()
@@ -210,7 +276,7 @@ class CommandAutocompleteOverlay(
             scaleY = 0.94f
             translationY = dp(12).toFloat()
             addView(
-                scrollView,
+                barRow,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT
@@ -218,7 +284,43 @@ class CommandAutocompleteOverlay(
             )
         }
 
-        val params = computeLayoutParams(anchorTopPx)
+        dragHandle.setOnTouchListener { _, event ->
+            val p = currentParams ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragStartX = p.x
+                    dragStartY = p.y
+                    touchStartRawX = event.rawX
+                    touchStartRawY = event.rawY
+                    // Reset auto-hide while dragging
+                    autoHideRunnable?.let { handler.removeCallbacks(it) }
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dm = context.resources.displayMetrics
+                    val newX = (dragStartX + (event.rawX - touchStartRawX).toInt())
+                        .coerceIn(dp(6), (dm.widthPixels - p.width - dp(6)).coerceAtLeast(dp(6)))
+                    val newY = (dragStartY + (event.rawY - touchStartRawY).toInt())
+                        .coerceIn(dp(36), (dm.heightPixels - dp(72)).coerceAtLeast(dp(36)))
+                    p.x = newX
+                    p.y = newY
+                    userDraggedPosition = newX to newY
+                    try {
+                        if (capsule.isAttachedToWindow) {
+                            wm.updateViewLayout(capsule, p)
+                        }
+                    } catch (_: Exception) {}
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    autoHideRunnable = hideTask
+                    handler.postDelayed(hideTask, AUTO_DISMISS_MS)
+                    true
+                }
+                else -> false
+            }
+        }
+
         try {
             wm.addView(capsule, params)
             currentContainer = capsule
@@ -237,7 +339,6 @@ class CommandAutocompleteOverlay(
                 start()
             }
 
-            // Re-schedule auto-hide after dismiss() cleared it above
             autoHideRunnable = hideTask
             handler.postDelayed(hideTask, AUTO_DISMISS_MS)
         } catch (_: Exception) {

@@ -269,16 +269,16 @@ object AuthManager {
                     ?.takeIf { it.isNotBlank() }
                     ?: user.displayName
                     ?: user.email?.substringBefore("@").orEmpty()
-                Result.success(
-                    UserAccount(
-                        uid = user.uid,
-                        email = user.email ?: snap.getString("email").orEmpty(),
-                        displayName = name,
-                        isPro = isPro,
-                        plan = plan,
-                        proExpiresAtMillis = expiresAt
-                    )
+                val account = UserAccount(
+                    uid = user.uid,
+                    email = user.email ?: snap.getString("email").orEmpty(),
+                    displayName = name,
+                    isPro = isPro,
+                    plan = plan,
+                    proExpiresAtMillis = expiresAt
                 )
+                AccessGateManager.setProStatus(context, account.isProActive)
+                Result.success(account)
             } else {
                 Result.success(user.toBasicAccount())
             }
@@ -290,6 +290,7 @@ object AuthManager {
     }
 
     fun signOut(context: Context) {
+        AccessGateManager.setProStatus(context, false)
         if (!isFirebaseConfigured(context)) return
         try {
             FirebaseAuth.getInstance().signOut()

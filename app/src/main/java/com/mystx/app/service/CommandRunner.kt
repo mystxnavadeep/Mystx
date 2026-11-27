@@ -8,6 +8,7 @@ import com.mystx.app.api.ApiError
 import com.mystx.app.api.ApiException
 import com.mystx.app.api.GeminiClient
 import com.mystx.app.api.OpenAICompatibleClient
+import com.mystx.app.manager.AccessGateManager
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.GeminiModels
 import com.mystx.app.model.PrefKeys
@@ -156,6 +157,10 @@ suspend fun runTextCommand(
 ): CommandOutcome {
     // keys_keystore_error rather than a "reinstall" message: the usual cause is the Keystore key
     // being invalidated by a lock-screen change, where re-adding the keys is enough.
+    if (!AccessGateManager.hasAiAccess(context)) {
+        AccessGateManager.launchUnlockPrompt(context)
+        return CommandOutcome.Unavailable("Watch a short video to unlock 6 hours of AI (or Go Pro).")
+    }
     if (!keyManager.keystoreAvailable) {
         return CommandOutcome.Unavailable(context.getString(R.string.keys_keystore_error))
     }
@@ -320,6 +325,10 @@ suspend fun runTextCommandStream(
     maxOutputTokens: Int = 2048,
     onChunk: (String) -> Unit
 ): CommandOutcome {
+    if (!AccessGateManager.hasAiAccess(context)) {
+        AccessGateManager.launchUnlockPrompt(context)
+        return CommandOutcome.Unavailable("Watch a short video to unlock 6 hours of AI (or Go Pro).")
+    }
     if (!keyManager.keystoreAvailable) {
         return CommandOutcome.Unavailable(context.getString(R.string.keys_keystore_error))
     }
@@ -475,6 +484,10 @@ suspend fun runImageCommand(
     imageBytes: ByteArray,
     mimeType: String
 ): CommandOutcome {
+    if (!AccessGateManager.hasAiAccess(context)) {
+        AccessGateManager.launchUnlockPrompt(context)
+        return CommandOutcome.Unavailable("Watch a short video to unlock 6 hours of AI (or Go Pro).")
+    }
     if (!keyManager.keystoreAvailable) {
         return CommandOutcome.Unavailable(context.getString(R.string.keys_keystore_error))
     }

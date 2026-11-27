@@ -20,5 +20,13 @@ service cloud.firestore {
 
       allow delete: if false;
     }
+
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending_verification';
+      allow update, delete: if false;
+    }
   }
 }

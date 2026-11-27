@@ -41,6 +41,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mystx.app.manager.AuthManager
 import com.mystx.app.model.PrefKeys
 import com.mystx.app.ui.AuthScreen
+import com.mystx.app.ui.billing.AdUnlockActivity
+import com.mystx.app.ui.billing.ProUpgradeScreen
 import com.mystx.app.ui.DashboardScreen
 import com.mystx.app.ui.KeysScreen
 import com.mystx.app.ui.SettingsScreen
@@ -62,6 +64,7 @@ enum class Tab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
 
 class MainActivity : ComponentActivity() {
     private var incomingPdfUri by mutableStateOf<Uri?>(null)
+    private var pendingOpenPro by mutableStateOf(false)
 
     private fun extractPdfUri(intent: Intent?): Uri? =
         if (intent?.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
@@ -76,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
         if (savedInstanceState == null) {
             incomingPdfUri = extractPdfUri(intent)
+            pendingOpenPro = intent?.getBooleanExtra(AdUnlockActivity.EXTRA_OPEN_PRO, false) == true
         }
 
         setContent {
@@ -95,7 +99,9 @@ class MainActivity : ComponentActivity() {
             MystxTheme(uiStyle = currentUiStyle) {
                 MystxMainScreen(
                     incomingPdfUri = incomingPdfUri,
-                    onIncomingPdfConsumed = { incomingPdfUri = null }
+                    onIncomingPdfConsumed = { incomingPdfUri = null },
+                    incomingOpenPro = pendingOpenPro,
+                    onIncomingOpenProConsumed = { pendingOpenPro = false }
                 )
             }
         }
@@ -105,6 +111,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         extractPdfUri(intent)?.let { incomingPdfUri = it }
+        if (intent.getBooleanExtra(AdUnlockActivity.EXTRA_OPEN_PRO, false)) { pendingOpenPro = true }
     }
 }
 
@@ -112,7 +119,9 @@ class MainActivity : ComponentActivity() {
 fun MystxMainScreen(
     vm: MystxViewModel = viewModel(),
     incomingPdfUri: Uri? = null,
-    onIncomingPdfConsumed: () -> Unit = {}
+    onIncomingPdfConsumed: () -> Unit = {},
+    incomingOpenPro: Boolean = false,
+    onIncomingOpenProConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showAuthScreen by rememberSaveable {
@@ -137,8 +146,16 @@ fun MystxMainScreen(
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
 
     var studioSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProScreen by rememberSaveable { mutableStateOf(false) }
     var pdfUriString by rememberSaveable { mutableStateOf<String?>(null) }
     val pdfUri = remember(pdfUriString) { pdfUriString?.let { Uri.parse(it) } }
+
+    LaunchedEffect(incomingOpenPro) {
+        if (incomingOpenPro) {
+            showProScreen = true
+            onIncomingOpenProConsumed()
+        }
+    }
 
     LaunchedEffect(incomingPdfUri) {
         if (incomingPdfUri != null) {
@@ -158,7 +175,7 @@ fun MystxMainScreen(
         }
     }
 
-    BackHandler(enabled = pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
+    BackHandler(enabled = showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
         if (pdfUri != null) {
             pdfUriString = null
         } else if (isEditing) {
@@ -207,7 +224,16 @@ fun MystxMainScreen(
                     .statusBarsPadding()
                     .imePadding()
             ) {
-                if (pdfUri != null) {
+                if (showProScreen) {
+                    ProUpgradeScreen(
+                        onBack = { showProScreen = false },
+                        onRequireSignIn = {
+                            showProScreen = false
+                            vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
+                            showAuthScreen = true
+                        }
+                    )
+                } else if (pdfUri != null) {
                     com.mystx.app.ui.PdfReaderScreen(pdfUri = pdfUri) {
                         pdfUriString = null
                     }
@@ -260,7 +286,8 @@ fun MystxMainScreen(
                             keyManager = vm.keyManager,
                             commandManager = vm.commandManager,
                             statsManager = vm.statsManager,
-                            onOpenPdf = { uri -> pdfUriString = uri.toString() }
+                            onOpenPdf = { uri -> pdfUriString = uri.toString() },
+                            onOpenPro = { showProScreen = true }
                         )
                     }
                     selectedTab == Tab.History -> {
@@ -276,6 +303,7 @@ fun MystxMainScreen(
                             prefs = vm.prefs,
                             keyManager = vm.keyManager,
                             onNavigateToCommandStudio = { studioSubScreen = "studio_from_settings" },
+                            onOpenPro = { showProScreen = true },
                             onOpenAuth = {
                                 vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
                                 showAuthScreen = true
@@ -287,7 +315,7 @@ fun MystxMainScreen(
         }
 
         // Floating glass dock — hovers over the content, centered, above the nav bar inset.
-        if (!isEditing && pdfUri == null) {
+        if (!isEditing && pdfUri == null && !showProScreen) {
             MystDock(
                 items = Tab.entries.map { MystDockItem(icon = it.icon, labelRes = it.titleRes) },
                 selected = selectedTab.ordinal,

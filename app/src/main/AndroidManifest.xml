@@ -4,11 +4,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
         <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" />
         </intent>
         <intent>
             <action android:name="android.intent.action.OPEN_DOCUMENT" />
@@ -64,6 +69,8 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".ui.billing.AdUnlockActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/Theme.Mystx.Dialog" />
 
         <service android:name=".service.AssistantService" android:exported="true" android:label="@string/accessibility_service_label" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>

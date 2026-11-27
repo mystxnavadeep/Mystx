@@ -268,6 +268,9 @@ jobs:
           VERSION_NAME: ${{ needs.version.outputs.version_name }}
           KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          UNITY_GAME_ID: ${{ secrets.UNITY_GAME_ID }}
+          UNITY_REWARDED_PLACEMENT: ${{ secrets.UNITY_REWARDED_PLACEMENT }}
+          UNITY_TEST_MODE: ${{ secrets.UNITY_TEST_MODE }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
