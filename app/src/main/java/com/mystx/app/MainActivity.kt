@@ -56,9 +56,9 @@ import com.mystx.app.ui.theme.MystUiStyle
 import com.mystx.app.ui.theme.MystxTheme
 
 enum class Tab(@param:StringRes val titleRes: Int, val icon: ImageVector) {
-    Dashboard(R.string.dashboard_title, Icons.Default.Home),
-    Keys(R.string.keys_title, Icons.Default.Lock),
-    Commands(R.string.command_studio_title, Icons.AutoMirrored.Filled.List),
+    Dashboard(R.string.tab_home, Icons.Default.Home),
+    Keys(R.string.tab_keys, Icons.Default.Lock),
+    Commands(R.string.tab_studio, Icons.AutoMirrored.Filled.List),
     History(R.string.history_title, Icons.Default.DateRange),
     Settings(R.string.settings_title, Icons.Default.Settings)
 }
@@ -178,7 +178,11 @@ fun MystxMainScreen(
     }
 
     BackHandler(enabled = showGuideScreen || showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
-        if (pdfUri != null) {
+        if (showGuideScreen) {
+            showGuideScreen = false
+        } else if (showProScreen) {
+            showProScreen = false
+        } else if (pdfUri != null) {
             pdfUriString = null
         } else if (isEditing) {
             if (selectedTab == Tab.Settings) {
@@ -295,7 +299,7 @@ fun MystxMainScreen(
                             onCreateCommand = {
                                 studioSubScreen = "editor_new"
                             },
-                            onBack = { selectedTab = Tab.Dashboard }
+                            onBack = null
                         )
                     }
                     selectedTab == Tab.Dashboard -> {

@@ -160,7 +160,7 @@
     <string name="command_studio_title">Command Studio</string>
     <string name="command_studio_desc">Manage prompt templates, per-command models, triggers &amp; variables</string>
     <string name="command_studio_search_hint">Search commands…</string>
-    <string name="command_studio_new_command">+ New Command</string>
+    <string name="command_studio_new_command">New Command</string>
     <string name="command_studio_edit_command">Edit Command</string>
     <string name="command_studio_create_title">New Command</string>
     <string name="command_studio_name_label">Command Name</string>
@@ -197,6 +197,9 @@
     <string name="command_studio_reset_confirm_msg">Revert prompt template, model and settings to default?</string>
     <string name="command_studio_empty_search">No commands match your filter</string>
     <string name="history_title">History</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_keys">Keys</string>
+    <string name="tab_studio">Studio</string>
     <string name="mystx_commands">mystx2</string>
     <string name="mystx_explain">mystx1</string>
     <!--<string name="action_settings">Settings</string>-->

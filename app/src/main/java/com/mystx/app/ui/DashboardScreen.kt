@@ -11,13 +11,19 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,8 +56,6 @@ import com.mystx.app.ui.components.MystGradientButton
 import com.mystx.app.ui.components.MystPill
 import com.mystx.app.ui.components.MystStatTile
 import com.mystx.app.ui.components.MystTonalButton
-import com.mystx.app.ui.components.ScreenTitle
-import com.mystx.app.ui.components.mystGradient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -65,13 +69,6 @@ private fun checkServiceEnabled(context: Context): Boolean {
     }
 }
 
-/**
- * Best-effort read of the framework's hidden `crashed` flag: a service stuck in the "crashed
- * services" limbo still reports as enabled, so [checkServiceEnabled] cannot see it. Returns
- * false whenever the reflection is unavailable — everything here is guarded (#125). Deliberate
- * hidden-API reflection: on API 36+ the read throws, the catch returns false, and the banner
- * simply falls back to the crash-marker pref.
- */
 @SuppressLint("SoonBlockedPrivateApi")
 private fun isServiceCrashed(context: Context): Boolean {
     return try {
@@ -89,7 +86,6 @@ private fun isServiceCrashed(context: Context): Boolean {
     }
 }
 
-/** Timestamp of the last uncaught crash recorded by [MystxApp], or 0. */
 private fun readCrashMarker(context: Context): Long =
     try {
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -118,15 +114,9 @@ fun DashboardScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var isServiceEnabled by remember { mutableStateOf(checkServiceEnabled(context)) }
-    // Not seeded from keyManager.getKeys(): that decrypts through AndroidKeyStore on the main
-    // thread. The LaunchedEffect below fills it in on the IO dispatcher, as it already did on
-    // every subsequent resume.
     var keyCount by remember { mutableIntStateOf(0) }
-    // Set when the process died unexpectedly (crash marker) or the framework holds the service
-    // in the crashed limbo (hidden flag) — the enabled-state check cannot see either.
     var showKilledBanner by remember { mutableStateOf(false) }
 
-    // Stats state
     var monthlyRequests by remember { mutableIntStateOf(statsManager.monthlyRequests) }
     var favoriteCommand by remember { mutableStateOf(statsManager.favoriteCommand) }
     var dailyCounts by remember { mutableStateOf(statsManager.dailyCounts()) }
@@ -184,66 +174,137 @@ fun DashboardScreen(
     }
 
     val noData = stringResource(R.string.dashboard_no_data)
+    val isProUser = AccessGateManager.isPro(context)
+    val passRemaining = AccessGateManager.remainingPassFormatted(context)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp).padding(top = 12.dp, bottom = 28.dp)
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Clean aligned header row: brand title + compact Guide chip
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ScreenTitle(stringResource(R.string.dashboard_title))
-            MystTonalButton(
-                text = "Guide",
-                onClick = onOpenGuide
-            )
+            Column {
+                Text(
+                    text = "Mystx",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onOpenGuide() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.HelpOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Guide",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         }
 
-        // Hero status panel — gradient border ring, floating enable action.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MystCardShape)
-                .background(MaterialTheme.colorScheme.surface)
-                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f), MystCardShape)
+        // Service + API Keys unified status card
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MystCardShape,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(
+                1.dp,
+                if (isServiceEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                else MaterialTheme.colorScheme.outline
+            )
         ) {
-            Column(Modifier.padding(18.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MystPill(
-                            text = (if (isServiceEnabled) stringResource(R.string.service_status_active)
-                            else stringResource(R.string.service_status_inactive)).uppercase()
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (isServiceEnabled) MaterialTheme.colorScheme.tertiary
-                                    else MaterialTheme.colorScheme.error
-                                )
-                        )
+                                    if (isServiceEnabled) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
+                                    else MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isServiceEnabled) MaterialTheme.colorScheme.tertiary
+                                        else MaterialTheme.colorScheme.error
+                                    )
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = if (isServiceEnabled) "Service Active" else "Service Off",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (keyCount > 0) {
+                                    stringResource(R.string.dashboard_keys_configured, keyCount)
+                                } else {
+                                    stringResource(R.string.dashboard_add_key_hint)
+                                },
+                                fontSize = 12.sp,
+                                color = if (keyCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+
                     if (!isServiceEnabled) {
                         MystGradientButton(
                             text = stringResource(R.string.service_enable),
-                            onClick = {
-                                showAccessibilityDisclosure = true
-                            }
+                            onClick = { showAccessibilityDisclosure = true }
                         )
+                    } else {
+                        MystPill(text = "READY")
                     }
                 }
 
                 if (!isServiceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    MystDivider()
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -251,10 +312,13 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Blocked by Restricted Settings? Tap App Info → Allow restricted settings.",
+                            text = "Restricted Settings blocked? Open App Info → Allow restricted settings.",
                             fontSize = 12.sp,
+                            lineHeight = 16.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f).padding(end = 10.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 10.dp)
                         )
                         MystTonalButton(
                             text = "App Info",
@@ -272,160 +336,28 @@ fun DashboardScreen(
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(14.dp))
-                MystDivider()
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.dashboard_api_keys_title),
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = stringResource(R.string.dashboard_keys_configured, keyCount),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        style = androidx.compose.ui.text.TextStyle(brush = mystGradient())
-                    )
-                }
-                if (keyCount == 0) {
-                    Text(
-                        text = stringResource(R.string.dashboard_add_key_hint),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
             }
         }
 
-        // Mystx Pro & 6-Hour Ad Pass Banner
-        val isProUser = AccessGateManager.isPro(context)
-        val passRemaining = AccessGateManager.remainingPassFormatted(context)
-        MystCard {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                    Text(
-                        text = if (isProUser) "Mystx Pro Active" else "AI Access · 6h Free / Pro",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = when {
-                            isProUser -> "Unlimited ad-free AI unlocked"
-                            passRemaining != null -> "Free 6h pass active · $passRemaining"
-                            else -> "Watch 1 video for 6h AI · or Go Pro (₹40/mo)"
-                        },
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (!isProUser) {
-                    MystGradientButton(
-                        text = "Go Pro",
-                        onClick = onOpenPro
-                    )
-                } else {
-                    MystPill(text = "PRO")
-                }
-            }
-            if (!isProUser) {
-                Spacer(modifier = Modifier.height(10.dp))
-                MystTonalButton(
-                    text = if (passRemaining != null) "Extend 6h Pass (Watch Video)" else "Watch Video · Unlock 6 Hours Free",
-                    onClick = { AccessGateManager.launchUnlockPrompt(context) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Open PDF Button
-        MystCard {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Read PDF",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Ask AI while reading",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                MystTonalButton(
-                    text = "Open",
-                    onClick = {
-                        try {
-                            pdfPickerLauncher.launch(arrayOf("application/pdf"))
-                        } catch (_: ActivityNotFoundException) {
-                        } catch (_: Exception) {
-                        }
-                    }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Interrupted-service banner: the toggle can still read "on" while the process is dead.
-        updateInfo?.let { info ->
-            MystDialog(
-                title = "Update Available",
-                message = "A new version of Mystx (${info.version}) is available. Would you like to download it now?",
-                confirmLabel = "Update",
-                dismissLabel = "Later",
-                onConfirm = {
-                    try {
-                        uriHandler.openUri(info.url)
-                    } catch (_: ActivityNotFoundException) {
-                    } catch (_: Exception) {
-                    }
-                    updateInfo = null
-                },
-                onDismissRequest = { updateInfo = null }
-            )
-        }
-
+        // Killed service warning banner (only when needed)
         if (showKilledBanner) {
             MystCard {
                 Text(
                     text = stringResource(R.string.dashboard_service_killed_title),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.dashboard_service_killed_message),
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     MystGradientButton(
                         text = stringResource(R.string.service_enable),
@@ -446,10 +378,121 @@ fun DashboardScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Stats grid — two glass tiles.
+        // AI Access Card — compact status + side-by-side action buttons
+        MystCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        text = if (isProUser) "Mystx Pro" else "AI Access",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = when {
+                            isProUser -> "Unlimited ad-free access active"
+                            passRemaining != null -> "6h free pass active · $passRemaining"
+                            else -> "Watch 1 video for 6h free, or unlock Pro"
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                MystPill(
+                    text = when {
+                        isProUser -> "PRO"
+                        passRemaining != null -> "6H PASS"
+                        else -> "FREE"
+                    }
+                )
+            }
+            if (!isProUser) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MystTonalButton(
+                        text = if (passRemaining != null) "Extend 6h" else "Watch 6h Ad",
+                        onClick = { AccessGateManager.launchUnlockPrompt(context) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    MystGradientButton(
+                        text = "Go Pro · ₹40",
+                        onClick = onOpenPro,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        // Sleek clickable PDF Reader row (no bloated giant button)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MystCardShape)
+                .clickable {
+                    try {
+                        pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                    } catch (_: ActivityNotFoundException) {
+                    } catch (_: Exception) {
+                    }
+                },
+            shape = MystCardShape,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "PDF Reader",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Open a PDF and highlight text to ask AI",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Open PDF",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Compact 2-column metrics
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -466,17 +509,26 @@ fun DashboardScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 7-day activity panel with gradient bars.
+        // Sleek compact 7-day activity chart with subtle day tracks
         MystCard {
-            Text(
-                text = stringResource(R.string.dashboard_last_7_days),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.dashboard_last_7_days),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${dailyCounts.sumOf { it.second }} runs",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
 
             val maxCount = dailyCounts.maxOfOrNull { it.second } ?: 0
             val dayNameFmt = remember { SimpleDateFormat("EEE", Locale.getDefault()) }
@@ -485,8 +537,8 @@ fun DashboardScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    .height(88.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 dailyCounts.forEach { (dateStr, count) ->
                     val dayLabel = try {
@@ -501,23 +553,28 @@ fun DashboardScreen(
                         Text(
                             text = if (count > 0) "$count" else "",
                             fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.BottomCenter
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(if (maxCount > 0) (count.toFloat() / maxCount).coerceAtLeast(if (count > 0) 0.05f else 0f) else 0f)
-                                    .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                    .background(mystGradient())
-                            )
+                            if (count > 0 && maxCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight((count.toFloat() / maxCount).coerceAtLeast(0.12f))
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.primary)
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -532,28 +589,39 @@ fun DashboardScreen(
         }
     }
 
+    updateInfo?.let { info ->
+        MystDialog(
+            title = "Update Available",
+            message = "A new version of Mystx (${info.version}) is available. Would you like to download it now?",
+            confirmLabel = "Update",
+            dismissLabel = "Later",
+            onConfirm = {
+                try {
+                    uriHandler.openUri(info.url)
+                } catch (_: ActivityNotFoundException) {
+                } catch (_: Exception) {
+                }
+                updateInfo = null
+            },
+            onDismissRequest = { updateInfo = null }
+        )
+    }
+
     if (showAccessibilityDisclosure) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showAccessibilityDisclosure = false },
-            title = { androidx.compose.material3.Text(stringResource(R.string.accessibility_disclosure_title)) },
-            text = { androidx.compose.material3.Text(stringResource(R.string.accessibility_disclosure_text)) },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    showAccessibilityDisclosure = false
-                    try {
-                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    } catch (_: ActivityNotFoundException) {
-                    } catch (_: Exception) {
-                    }
-                }) {
-                    androidx.compose.material3.Text(stringResource(R.string.accessibility_disclosure_agree))
+        MystDialog(
+            title = stringResource(R.string.accessibility_disclosure_title),
+            message = stringResource(R.string.accessibility_disclosure_text),
+            confirmLabel = stringResource(R.string.accessibility_disclosure_agree),
+            dismissLabel = stringResource(R.string.commands_cancel),
+            onConfirm = {
+                showAccessibilityDisclosure = false
+                try {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } catch (_: ActivityNotFoundException) {
+                } catch (_: Exception) {
                 }
             },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showAccessibilityDisclosure = false }) {
-                    androidx.compose.material3.Text(stringResource(R.string.commands_cancel))
-                }
-            }
+            onDismissRequest = { showAccessibilityDisclosure = false }
         )
     }
 }

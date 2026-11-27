@@ -1,5 +1,6 @@
 package com.mystx.app.ui.studio
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,78 +67,77 @@ fun CommandStudioScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp)
-            .padding(top = 16.dp)
-            .padding(bottom = 112.dp)
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp, bottom = 12.dp)
     ) {
-        // Top Bar
+        // Clean aligned header with inline "+ New" button (no eyebrow, no bloated banner)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (onBack != null) {
-                MystIconButton(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    onClick = onBack,
-                    modifier = Modifier.padding(end = 12.dp)
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (onBack != null) {
+                    MystIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack,
+                        modifier = Modifier.padding(end = 10.dp)
+                    )
+                }
                 Text(
-                    text = stringResource(R.string.app_name).uppercase(),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 4.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 2.dp)
-                )
-                Text(
-                    text = stringResource(R.string.command_studio_title),
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    text = "Studio",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
                     color = MaterialTheme.colorScheme.onBackground
                 )
             }
+
+            MystGradientButton(
+                text = "New",
+                onClick = onCreateCommand,
+                leadingIcon = Icons.Default.Add
+            )
         }
 
-        // Search Field
+        // Compact Search Bar
         val searchLabel = stringResource(R.string.command_studio_search_hint)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
+                .padding(bottom = 10.dp)
                 .semantics { contentDescription = searchLabel },
             shape = MystCompactShape,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            border = androidx.compose.foundation.BorderStroke(
-                0.5.dp,
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-            )
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 BasicTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     singleLine = true,
                     textStyle = LocalTextStyle.current.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Normal,
                         color = MaterialTheme.colorScheme.onSurface
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -146,9 +147,8 @@ fun CommandStudioScreen(
                             if (searchQuery.isEmpty()) {
                                 Text(
                                     text = searchLabel,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Normal,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                                 )
                             }
                             innerTextField()
@@ -161,7 +161,7 @@ fun CommandStudioScreen(
                         contentDescription = stringResource(R.string.commands_search_close),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(17.dp)
                             .clickable(interactionSource = null, indication = null) {
                                 searchQuery = ""
                             }
@@ -170,53 +170,44 @@ fun CommandStudioScreen(
             }
         }
 
-        // Category Filter Chips
+        // Tailored Category Filter Chips (8dp radius, solid active accent)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             CommandCategory.FILTER_CATEGORIES.forEach { category ->
                 val isSelected = selectedCategory == category
+                val chipShape = RoundedCornerShape(8.dp)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(chipShape)
                         .background(
-                            if (isSelected) mystGradient()
-                            else SolidColor(MaterialTheme.colorScheme.surfaceVariant)
+                            if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface
                         )
                         .border(
-                            width = 0.5.dp,
-                            color = if (isSelected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(999.dp)
+                            width = 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            shape = chipShape
                         )
                         .clickable {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             selectedCategory = category
                         }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = category.displayName,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
-
-        // New Command Button
-        MystGradientButton(
-            text = stringResource(R.string.command_studio_new_command),
-            onClick = onCreateCommand,
-            leadingIcon = Icons.Default.Add,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp)
-        )
 
         // Command Cards List
         if (filteredCommands.isEmpty()) {
@@ -229,7 +220,7 @@ fun CommandStudioScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 8.dp)
             ) {
                 items(filteredCommands, key = { "${it.id}:${it.trigger}" }) { cmd ->
@@ -256,40 +247,53 @@ private fun CommandStudioCard(
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val shape = RoundedCornerShape(12.dp)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(MystCardShape)
+            .clip(shape)
             .clickable {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onClick()
             },
-        shape = MystCardShape,
+        shape = shape,
         color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline
-        ),
-        shadowElevation = 4.dp
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        shadowElevation = 0.dp
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-        ) {
-            // Row 1: Command Name + Enabled Switch
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            // Row 1: Monospace trigger badge + Name + Switch
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = command.name,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = command.trigger,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                    Text(
+                        text = command.name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Switch(
                     checked = command.enabled,
                     onCheckedChange = {
@@ -297,78 +301,30 @@ private fun CommandStudioCard(
                         onToggleEnabled(it)
                     },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                         checkedTrackColor = MaterialTheme.colorScheme.primary,
-                        uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        uncheckedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Row 2: Trigger + Category Badge
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = command.trigger,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(
-                            0.5.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                            RoundedCornerShape(999.dp)
-                        )
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = command.category.displayName,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (command.isBuiltIn) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.commands_built_in),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Normal,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Row 3: Short Prompt Preview
+            // Row 2: Concise prompt preview
             Text(
                 text = command.promptTemplate.replace('\n', ' ').trim(),
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                lineHeight = 18.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
-            MystDivider()
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Row 4: Model info + Temperature + Edit hint
+            // Row 3: Compact metadata line
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -379,28 +335,19 @@ private fun CommandStudioCard(
                     "%.1f",
                     command.temperature ?: globalTemperature
                 )
-
                 Text(
-                    text = "Model: $modelDisplay",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "${command.category.displayName} · $modelDisplay · T $tempDisplay",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "  ·  ",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.outline
-                )
-                Text(
-                    text = "Temperature: $tempDisplay",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.weight(1f))
                 Icon(
                     imageVector = Icons.Default.Edit,
                     contentDescription = stringResource(R.string.commands_edit_command),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }

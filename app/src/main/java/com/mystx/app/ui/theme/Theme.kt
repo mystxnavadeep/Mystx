@@ -19,18 +19,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.mystx.app.R
 import com.mystx.app.model.PrefKeys
 
-val MystAqua = Color(0xFF2F7CF6)
-val MystTeal = Color(0xFF2563EB)
+// Signature Emerald-Teal brand tokens (replaces generic royal blue)
+val MystAqua = Color(0xFF14B8A6)
+val MystTeal = Color(0xFF0F766E)
 val MystAmber = Color(0xFFF59E0B)
 
-fun mystBrandGradient() = listOf(MystAqua, MystTeal)
+fun mystBrandGradient() = listOf(MystTeal, MystAqua)
 
 enum class MystUiStyle(
     val key: String,
@@ -43,44 +46,44 @@ enum class MystUiStyle(
 ) {
     LIQUID_GLASS(
         key = "liquid_glass",
-        label = "Midnight",
-        subtitle = "Clean dark ink & crisp blue",
-        previewBg = Color(0xFF0B0D11),
-        previewAccent = Color(0xFF2F7CF6),
-        cardCornerDp = 16
+        label = "Obsidian",
+        subtitle = "Deep slate & emerald teal",
+        previewBg = Color(0xFF090B0E),
+        previewAccent = Color(0xFF14B8A6),
+        cardCornerDp = 14
     ),
     WARM_EDITORIAL(
         key = "warm_editorial",
-        label = "Daylight",
-        subtitle = "Clean light paper & high contrast",
-        previewBg = Color(0xFFF5F6F8),
-        previewAccent = Color(0xFF2563EB),
-        cardCornerDp = 16,
+        label = "Warm Paper",
+        subtitle = "Ivory canvas & forest teal",
+        previewBg = Color(0xFFF7F6F2),
+        previewAccent = Color(0xFF0F766E),
+        cardCornerDp = 14,
         isLight = true
     ),
     LINEAR_PRO(
         key = "linear_pro",
-        label = "Graphite",
-        subtitle = "Matte charcoal & indigo accents",
-        previewBg = Color(0xFF0E1015),
-        previewAccent = Color(0xFF6366F1),
+        label = "Carbon Amber",
+        subtitle = "Matte carbon & warm gold",
+        previewBg = Color(0xFF0C0D10),
+        previewAccent = Color(0xFFF59E0B),
         cardCornerDp = 12
     ),
     NOTHING_OS(
         key = "nothing_os",
         label = "OLED Mono",
-        subtitle = "Pure black & signal red",
+        subtitle = "Pure black & crimson signal",
         previewBg = Color(0xFF000000),
-        previewAccent = Color(0xFFD71921),
-        cardCornerDp = 14
+        previewAccent = Color(0xFFE11D48),
+        cardCornerDp = 12
     ),
     MATERIAL_YOU(
         key = "material_you",
         label = "Material You",
         subtitle = "Matches your phone wallpaper",
-        previewBg = Color(0xFF101918),
+        previewBg = Color(0xFF0E1716),
         previewAccent = Color(0xFF2DD4BF),
-        cardCornerDp = 22
+        cardCornerDp = 16
     );
 
     companion object {
@@ -99,80 +102,79 @@ val Poppins = FontFamily(
 )
 
 private fun mystTypography(style: MystUiStyle): Typography {
-    val base = Typography()
-    val family = if (style == MystUiStyle.NOTHING_OS) FontFamily.Monospace else Poppins
-    return base.copy(
-        displayLarge = base.displayLarge.copy(fontFamily = family),
-        displayMedium = base.displayMedium.copy(fontFamily = family),
-        displaySmall = base.displaySmall.copy(fontFamily = family),
-        headlineLarge = base.headlineLarge.copy(fontFamily = family),
-        headlineMedium = base.headlineMedium.copy(fontFamily = family),
-        headlineSmall = base.headlineSmall.copy(fontFamily = family),
-        titleLarge = base.titleLarge.copy(fontFamily = family),
-        titleMedium = base.titleMedium.copy(fontFamily = family),
-        titleSmall = base.titleSmall.copy(fontFamily = family),
-        bodyLarge = base.bodyLarge.copy(fontFamily = family),
-        bodyMedium = base.bodyMedium.copy(fontFamily = family),
-        bodySmall = base.bodySmall.copy(fontFamily = family),
-        labelLarge = base.labelLarge.copy(fontFamily = family),
-        labelMedium = base.labelMedium.copy(fontFamily = family),
-        labelSmall = base.labelSmall.copy(fontFamily = family)
+    val family = if (style == MystUiStyle.NOTHING_OS) FontFamily.Monospace else FontFamily.SansSerif
+    return Typography(
+        displayLarge = TextStyle(fontFamily = family, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp, letterSpacing = (-0.6).sp),
+        displayMedium = TextStyle(fontFamily = family, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp, letterSpacing = (-0.5).sp),
+        displaySmall = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = (-0.3).sp),
+        headlineLarge = TextStyle(fontFamily = family, fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = (-0.4).sp),
+        headlineMedium = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.3).sp),
+        headlineSmall = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 24.sp, letterSpacing = (-0.2).sp),
+        titleLarge = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 22.sp, letterSpacing = (-0.2).sp),
+        titleMedium = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = (-0.1).sp),
+        titleSmall = TextStyle(fontFamily = family, fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp, letterSpacing = 0.sp),
+        bodyLarge = TextStyle(fontFamily = family, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 22.sp, letterSpacing = 0.sp),
+        bodyMedium = TextStyle(fontFamily = family, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.sp),
+        bodySmall = TextStyle(fontFamily = family, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.1.sp),
+        labelLarge = TextStyle(fontFamily = family, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 18.sp, letterSpacing = 0.sp),
+        labelMedium = TextStyle(fontFamily = family, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.2.sp),
+        labelSmall = TextStyle(fontFamily = family, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.2.sp)
     )
 }
 
-private val MidnightColorScheme = darkColorScheme(
-    background = Color(0xFF0B0D11),
-    surface = Color(0xFF14171F),
-    surfaceVariant = Color(0xFF1C202B),
-    surfaceContainerHigh = Color(0xFF222734),
+private val ObsidianColorScheme = darkColorScheme(
+    background = Color(0xFF090B0E),
+    surface = Color(0xFF12161C),
+    surfaceVariant = Color(0xFF191F28),
+    surfaceContainerHigh = Color(0xFF202733),
     onBackground = Color(0xFFF8FAFC),
-    onSurface = Color(0xFFF8FAFC),
+    onSurface = Color(0xFFF1F5F9),
     onSurfaceVariant = Color(0xFF94A3B8),
-    outline = Color(0xFF262B38),
-    primary = Color(0xFF2F7CF6),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF162C52),
-    onPrimaryContainer = Color(0xFFDBEAFE),
+    outline = Color(0xFF252D3A),
+    primary = Color(0xFF14B8A6),
+    onPrimary = Color(0xFF042F2E),
+    primaryContainer = Color(0xFF113330),
+    onPrimaryContainer = Color(0xFFCCFBF1),
     secondary = Color(0xFF22C55E),
     tertiary = Color(0xFF22C55E),
     tertiaryContainer = Color(0xFF123524),
-    error = Color(0xFFEF4444),
+    error = Color(0xFFF87171),
     errorContainer = Color(0xFF451A1A)
 )
 
-private val DaylightColorScheme = lightColorScheme(
-    background = Color(0xFFF5F6F8),
+private val WarmPaperColorScheme = lightColorScheme(
+    background = Color(0xFFF7F6F2),
     surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFF0F2F5),
+    surfaceVariant = Color(0xFFEFEDE7),
     surfaceContainerHigh = Color(0xFFFFFFFF),
-    onBackground = Color(0xFF0F172A),
-    onSurface = Color(0xFF0F172A),
-    onSurfaceVariant = Color(0xFF64748B),
-    outline = Color(0xFFE2E6ED),
-    primary = Color(0xFF2563EB),
+    onBackground = Color(0xFF111827),
+    onSurface = Color(0xFF111827),
+    onSurfaceVariant = Color(0xFF6B7280),
+    outline = Color(0xFFE2DFD6),
+    primary = Color(0xFF0F766E),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFDBEAFE),
-    onPrimaryContainer = Color(0xFF1E3A8A),
-    secondary = Color(0xFF16A34A),
-    tertiary = Color(0xFF16A34A),
+    primaryContainer = Color(0xFFCCFBF1),
+    onPrimaryContainer = Color(0xFF115E59),
+    secondary = Color(0xFF15803D),
+    tertiary = Color(0xFF15803D),
     tertiaryContainer = Color(0xFFDCFCE7),
     error = Color(0xFFDC2626),
     errorContainer = Color(0xFFFEE2E2)
 )
 
-private val GraphiteColorScheme = darkColorScheme(
-    background = Color(0xFF0E1015),
-    surface = Color(0xFF161922),
-    surfaceVariant = Color(0xFF1F2330),
-    surfaceContainerHigh = Color(0xFF262B3B),
+private val CarbonAmberColorScheme = darkColorScheme(
+    background = Color(0xFF0C0D10),
+    surface = Color(0xFF14161B),
+    surfaceVariant = Color(0xFF1C1F26),
+    surfaceContainerHigh = Color(0xFF232730),
     onBackground = Color(0xFFF3F4F6),
     onSurface = Color(0xFFF3F4F6),
     onSurfaceVariant = Color(0xFF9CA3AF),
-    outline = Color(0xFF2B3040),
-    primary = Color(0xFF6366F1),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF242654),
-    onPrimaryContainer = Color(0xFFE0E7FF),
+    outline = Color(0xFF282C36),
+    primary = Color(0xFFF59E0B),
+    onPrimary = Color(0xFF1C1302),
+    primaryContainer = Color(0xFF3A2807),
+    onPrimaryContainer = Color(0xFFFEF3C7),
     secondary = Color(0xFF10B981),
     tertiary = Color(0xFF10B981),
     tertiaryContainer = Color(0xFF0F352A),
@@ -188,11 +190,11 @@ private val OledMonoColorScheme = darkColorScheme(
     onBackground = Color(0xFFFFFFFF),
     onSurface = Color(0xFFFFFFFF),
     onSurfaceVariant = Color(0xFFA1A1AA),
-    outline = Color(0xFF2E2E36),
-    primary = Color(0xFFD71921),
+    outline = Color(0xFF27272E),
+    primary = Color(0xFFE11D48),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF3D0C0F),
-    onPrimaryContainer = Color(0xFFFFDAD9),
+    primaryContainer = Color(0xFF3F0B19),
+    onPrimaryContainer = Color(0xFFFFE4E6),
     secondary = Color(0xFF22C55E),
     tertiary = Color(0xFF22C55E),
     tertiaryContainer = Color(0xFF123524),
@@ -239,12 +241,12 @@ fun MystxTheme(
     }
 
     val colorScheme: ColorScheme = if (forceLight) {
-        DaylightColorScheme
+        WarmPaperColorScheme
     } else {
         when (resolvedStyle) {
-            MystUiStyle.LIQUID_GLASS -> MidnightColorScheme
-            MystUiStyle.WARM_EDITORIAL -> DaylightColorScheme
-            MystUiStyle.LINEAR_PRO -> GraphiteColorScheme
+            MystUiStyle.LIQUID_GLASS -> ObsidianColorScheme
+            MystUiStyle.WARM_EDITORIAL -> WarmPaperColorScheme
+            MystUiStyle.LINEAR_PRO -> CarbonAmberColorScheme
             MystUiStyle.NOTHING_OS -> OledMonoColorScheme
             MystUiStyle.MATERIAL_YOU -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
