@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Cleartext is permitted at the platform layer because the NSC cannot
-         express IP ranges. The app-level guard (EndpointValidator) restricts
-         http:// to private-LAN endpoints; all other traffic is https://. -->
-    <base-config cleartextTrafficPermitted="true" />
+    <!-- Enforce HTTPS globally for all cloud APIs and third-party SDKs -->
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- Allow cleartext HTTP only for local/emulator development endpoints (e.g. Ollama) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
 </network-security-config>

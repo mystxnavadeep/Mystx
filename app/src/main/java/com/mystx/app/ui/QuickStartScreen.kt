@@ -96,6 +96,12 @@ fun QuickStartScreen(
         )
     }
     var keys by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedProvider by remember {
+        mutableStateOf(
+            ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+                .let { if (it == ProviderType.GROQ) ProviderType.SARVAM else it }
+        )
+    }
     var newKey by remember { mutableStateOf("") }
     var isTesting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -339,10 +345,54 @@ fun QuickStartScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            ProviderType.GEMINI to "Gemini",
+                            ProviderType.SARVAM to "Sarvam",
+                            ProviderType.OPENCODE to "OpenCode"
+                        ).forEach { (pType, pLabel) ->
+                            val isSel = selectedProvider == pType
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedProvider = pType },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = pLabel,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     MystTextField(
                         value = newKey,
-                        onValueChange = { if (it.length <= 256) newKey = it },
-                        placeholder = { Text("Paste Gemini, Sarvam AI, or OpenCode key", fontSize = 13.sp) },
+                        onValueChange = { input ->
+                            if (input.length <= 256) {
+                                newKey = input
+                                if (input.trim().startsWith("AIza")) selectedProvider = ProviderType.GEMINI
+                            }
+                        },
+                        placeholder = { Text("Paste API key", fontSize = 13.sp) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation()
                     )
@@ -368,7 +418,7 @@ fun QuickStartScreen(
                                     newKey = ""
                                     return@launch
                                 }
-                                val detected = KeyManager.detectProviderType(trimmed, activeProv)
+                                val detected = selectedProvider
                                 val customEp = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
                                 val result = when (detected) {
                                     ProviderType.GEMINI -> geminiClient.validateKey(trimmed)

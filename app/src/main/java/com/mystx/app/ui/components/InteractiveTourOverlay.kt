@@ -83,8 +83,9 @@ fun InteractiveTourOverlay(
             )
     ) {
         val totalWidthPx = with(density) { maxWidth.toPx() }
+        val clampedStartDp = animStart.coerceAtMost((maxWidth - 110.dp).coerceAtLeast(14.dp))
         val topPx = with(density) { animTop.toPx() }
-        val startPx = with(density) { animStart.toPx() }
+        val startPx = with(density) { clampedStartDp.toPx() }
         val endPx = with(density) { animEnd.toPx() }
         val heightPx = with(density) { animHeight.toPx() }
         val rectWidthPx = (totalWidthPx - startPx - endPx).coerceAtLeast(48f)
@@ -109,7 +110,7 @@ fun InteractiveTourOverlay(
         // Interactive glowing ring over the spotlight — tapping it advances the tour
         Box(
             modifier = Modifier
-                .padding(top = animTop, start = animStart, end = animEnd)
+                .padding(top = animTop, start = clampedStartDp, end = animEnd)
                 .fillMaxWidth()
                 .height(animHeight)
                 .clip(RoundedCornerShape(14.dp))

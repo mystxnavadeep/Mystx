@@ -275,8 +275,11 @@ fun MystxMainScreen(
         }
     }
 
-    BackHandler(enabled = showGuideScreen || showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
-        if (showGuideScreen) {
+    BackHandler(enabled = tourStep >= 0 || showGuideScreen || showProScreen || pdfUri != null || studioSubScreen != null || (selectedTab == Tab.Commands && isEditing)) {
+        if (tourStep >= 0) {
+            vm.prefs.edit().putBoolean(PrefKeys.WALKTHROUGH_COMPLETED, true).apply()
+            tourStep = -1
+        } else if (showGuideScreen) {
             showGuideScreen = false
         } else if (showProScreen) {
             showProScreen = false

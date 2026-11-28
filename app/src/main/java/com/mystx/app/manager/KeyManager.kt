@@ -99,6 +99,8 @@ class KeyManager internal constructor(
     private var cacheTimestamp = 0L
     @Volatile
     private var cachedCipherText: String? = null
+    @Volatile
+    private var cachedProviderMap: Map<String, String>? = null
 
     val keystoreAvailable: Boolean get() = cipher.available
 
@@ -111,8 +113,13 @@ class KeyManager internal constructor(
     }
 
     private fun loadProviderMap(): MutableMap<String, String> {
-        val raw = prefs.getString(PREF_KEY_PROVIDERS, null) ?: return mutableMapOf()
-        return try {
+        cachedProviderMap?.let { return it.toMutableMap() }
+        val raw = prefs.getString(PREF_KEY_PROVIDERS, null)
+        if (raw == null) {
+            cachedProviderMap = emptyMap()
+            return mutableMapOf()
+        }
+        val parsed = try {
             val obj = JSONObject(raw)
             val map = mutableMapOf<String, String>()
             val it = obj.keys()
@@ -125,9 +132,12 @@ class KeyManager internal constructor(
         } catch (_: Exception) {
             mutableMapOf()
         }
+        cachedProviderMap = parsed.toMap()
+        return parsed
     }
 
     private fun saveProviderMap(map: Map<String, String>) {
+        cachedProviderMap = map.toMap()
         try {
             val obj = JSONObject()
             map.forEach { (k, v) -> obj.put(k, v) }

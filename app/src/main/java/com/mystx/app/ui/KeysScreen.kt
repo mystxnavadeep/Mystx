@@ -306,9 +306,9 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                 enabled = newKey.isNotBlank() && !isTesting && keyManager.keystoreAvailable,
                 modifier = Modifier.fillMaxWidth()
             )
-            if (testResult != null) {
+            testResult?.let { msg ->
                 Text(
-                    text = testResult!!,
+                    text = msg,
                     color = if (testSuccess) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 8.dp)

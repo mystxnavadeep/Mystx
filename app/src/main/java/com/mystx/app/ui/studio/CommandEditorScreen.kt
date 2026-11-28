@@ -760,9 +760,10 @@ fun CommandEditorScreen(
                 val modelVal = if (modelOverride.isBlank() || modelOverride.equals("Global", ignoreCase = true)) null else modelOverride
                 val tempVal = if (useCustomTemp) temperature else null
 
-                if (isBuiltIn) {
+                val existingCommand = initialCommand
+                if (isBuiltIn && existingCommand != null) {
                     // Built-in command: persist meta overrides
-                    val updated = initialCommand!!.copy(
+                    val updated = existingCommand.copy(
                         name = trimmedName,
                         category = category,
                         promptTemplate = promptText,

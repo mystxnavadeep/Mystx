@@ -57,8 +57,8 @@ import com.mystx.app.ui.components.MystExposedDropdownMenu
 import com.mystx.app.ui.components.MystGradientButton
 import com.mystx.app.ui.components.MystTextField
 import com.mystx.app.ui.components.MystTonalButton
-import com.mystx.app.ui.theme.MystUiStyle
 import com.mystx.app.ui.components.ScreenTitle
+import com.mystx.app.ui.theme.MystUiStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -731,15 +731,18 @@ fun SettingsScreen(
                 MystGradientButton(
                     text = if (isFetchingModels) fetchingModelsMsg else fetchModelsMsg,
                     onClick = {
-                        val activeKey = keyManager.getKeysForProvider(providerType, providerType, customEndpoint).firstOrNull()
-                        if (providerType != ProviderType.CUSTOM && activeKey.isNullOrBlank()) {
-                            fetchMessage = noApiKeyMsg
-                            fetchSuccess = false
-                            return@MystGradientButton
-                        }
                         isFetchingModels = true
                         fetchMessage = null
                         scope.launch {
+                            val activeKey = withContext(Dispatchers.IO) {
+                                keyManager.getKeysForProvider(providerType, providerType, customEndpoint).firstOrNull()
+                            }
+                            if (providerType != ProviderType.CUSTOM && activeKey.isNullOrBlank()) {
+                                isFetchingModels = false
+                                fetchMessage = noApiKeyMsg
+                                fetchSuccess = false
+                                return@launch
+                            }
                             val result = ModelDiscoveryService.discoverAndCache(
                                 providerType = providerType,
                                 apiKey = activeKey,

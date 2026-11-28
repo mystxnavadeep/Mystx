@@ -16,6 +16,7 @@ object AccessGateManager {
 
     private const val PREFS_NAME = "access_gate"
     private const val KEY_IS_PRO = "is_pro_cached"
+    private const val KEY_PRO_EXPIRES_AT = "pro_expires_at_cached"
     private const val KEY_PASS_WALL_EXPIRY = "ad_pass_wall_expiry"
     private const val KEY_PASS_ELAPSED_EXPIRY = "ad_pass_elapsed_expiry"
 
@@ -25,12 +26,19 @@ object AccessGateManager {
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun setProStatus(context: Context, isPro: Boolean) {
-        prefs(context).edit().putBoolean(KEY_IS_PRO, isPro).apply()
+    fun setProStatus(context: Context, isPro: Boolean, expiresAtMillis: Long = 0L) {
+        prefs(context).edit()
+            .putBoolean(KEY_IS_PRO, isPro)
+            .putLong(KEY_PRO_EXPIRES_AT, if (isPro) expiresAtMillis else 0L)
+            .apply()
     }
 
-    fun isPro(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_IS_PRO, false)
+    fun isPro(context: Context): Boolean {
+        val p = prefs(context)
+        if (!p.getBoolean(KEY_IS_PRO, false)) return false
+        val expiresAt = p.getLong(KEY_PRO_EXPIRES_AT, 0L)
+        return expiresAt == 0L || expiresAt > System.currentTimeMillis()
+    }
 
     fun grantAdPass(context: Context) {
         val nowWall = System.currentTimeMillis()

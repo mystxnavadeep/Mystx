@@ -200,14 +200,15 @@ fun ProUpgradeScreen(
             }
         }
 
-        if (account == null) {
+        val currentAccount = account
+        if (currentAccount == null) {
             MystGradientButton(
                 text = "Sign In to Upgrade",
                 onClick = onRequireSignIn,
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
-            val acc = account!!
+            val acc = currentAccount
             MystCard {
                 Text(
                     text = "Step 1 · Pay via UPI (0% Fee)",
@@ -329,8 +330,7 @@ fun ProUpgradeScreen(
                                     suspendCancellableCoroutine<Unit> { cont ->
                                         FirebaseFirestore.getInstance()
                                             .collection("payments")
-                                            .document(cleanUtr)
-                                            .set(receipt)
+                                            .add(receipt)
                                             .addOnSuccessListener { if (cont.isActive) cont.resume(Unit) }
                                             .addOnFailureListener { e -> if (cont.isActive) cont.resumeWithException(e) }
                                     }

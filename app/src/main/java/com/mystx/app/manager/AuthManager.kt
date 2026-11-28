@@ -277,7 +277,7 @@ object AuthManager {
                     plan = plan,
                     proExpiresAtMillis = expiresAt
                 )
-                AccessGateManager.setProStatus(context, account.isProActive)
+                AccessGateManager.setProStatus(context, account.isProActive, account.proExpiresAtMillis)
                 Result.success(account)
             } else {
                 Result.success(user.toBasicAccount())

@@ -621,7 +621,7 @@ fun DashboardScreen(
                 dailyCounts.forEach { (dateStr, count) ->
                     val dayLabel = try {
                         val date = dateParseFmt.parse(dateStr)
-                        dayNameFmt.format(date!!).take(3)
+                        date?.let { dayNameFmt.format(it).take(3) } ?: "?"
                     } catch (_: Exception) { "?" }
 
                     Column(
