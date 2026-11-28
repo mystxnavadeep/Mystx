@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +25,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -42,11 +45,11 @@ import com.mystx.app.ui.components.MystEmptyState
 import com.mystx.app.ui.components.MystGradientButton
 import com.mystx.app.ui.components.MystItemCard
 import com.mystx.app.ui.components.MystTextField
+import com.mystx.app.ui.components.MystTonalButton
 import com.mystx.app.ui.components.ScreenTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 
 @Composable
 fun getProviderHint(key: String): String {
@@ -63,9 +66,6 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val uriHandler = LocalUriHandler.current
-    // Deliberately not seeded from keyManager.getKeys(): that decrypts through AndroidKeyStore
-    // (and on a legacy store also does a synchronous prefs commit), which ran on the main thread
-    // during composition. Loaded in the LaunchedEffect below instead.
     var keys by remember { mutableStateOf<List<String>>(emptyList()) }
     var keyToDelete by remember { mutableStateOf<String?>(null) }
     var newKey by remember { mutableStateOf("") }
@@ -88,11 +88,19 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
     val signinRequiredMsg = stringResource(R.string.error_provider_auth_required)
     val endpointNeedsV1Msg = stringResource(R.string.keys_endpoint_needs_v1)
 
+    val geminiTotal = keys.count { KeyManager.detectProviderType(it) == ProviderType.GEMINI }
+    val geminiReady = keys.count { KeyManager.detectProviderType(it) == ProviderType.GEMINI && keyManager.getKeyHealth(it).isReady }
+    val groqTotal = keys.count { KeyManager.detectProviderType(it) == ProviderType.GROQ }
+    val groqReady = keys.count { KeyManager.detectProviderType(it) == ProviderType.GROQ && keyManager.getKeyHealth(it).isReady }
+    val otherTotal = keys.size - geminiTotal - groqTotal
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { } // Creates a hardware layer for smooth NavHost slide animations
-            .padding(horizontal = 20.dp).padding(top = 16.dp).padding(bottom = 28.dp)
+            .graphicsLayer { }
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ScreenTitle(stringResource(R.string.keys_title))
 
@@ -104,18 +112,44 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                     fontSize = 13.sp
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Provider Availability & Load Balancing Summary
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ProviderAvailabilityCard(
+                label = "Gemini",
+                ready = geminiReady,
+                total = geminiTotal,
+                modifier = Modifier.weight(1f)
+            )
+            ProviderAvailabilityCard(
+                label = "Groq Backup",
+                ready = groqReady,
+                total = groqTotal,
+                modifier = Modifier.weight(1f)
+            )
+            if (otherTotal > 0) {
+                ProviderAvailabilityCard(
+                    label = "Custom",
+                    ready = otherTotal,
+                    total = otherTotal,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         MystCard {
             MystTextField(
                 value = newKey,
                 onValueChange = { if (it.length <= 256) newKey = it },
-                placeholder = { Text(stringResource(R.string.keys_api_key_label)) },
+                placeholder = { Text("Paste Gemini (AIza...) or Groq (gsk_...) key", fontSize = 13.sp) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation()
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             MystGradientButton(
                 text = if (isTesting) stringResource(R.string.keys_testing) else stringResource(R.string.keys_add_key),
                 onClick = {
@@ -127,33 +161,27 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                             val trimmedKey = newKey.trim()
                             if (withContext(Dispatchers.IO) { keyManager.getKeys() }.contains(trimmedKey)) {
                                 isTesting = false
-                                // Re-adding an existing key means the user is retrying it after a
-                                // failure — clear any invalid/rate-limit bench so the service can
-                                // use it again immediately instead of waiting out the 15-min TTL.
                                 withContext(Dispatchers.IO) { keyManager.clearMarks(trimmedKey) }
                                 testResult = alreadyAddedMsg
                                 testSuccess = false
                                 return@launch
                             }
-                            val result = run {
-                                val providerType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, null))
-                                val customEndpoint = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
-                                when {
-                                    providerType == ProviderType.CUSTOM && customEndpoint.isBlank() -> {
-                                        isTesting = false
-                                        testResult = customEndpointRequiredMsg
-                                        testSuccess = false
-                                        return@launch
-                                    }
-                                    providerType == ProviderType.GROQ ->
-                                        openAIClient.validateKey(trimmedKey, GroqConfig.ENDPOINT)
-                                    providerType == ProviderType.BAI ->
-                                        openAIClient.validateKey(trimmedKey, BaiConfig.ENDPOINT)
-                                    providerType == ProviderType.CUSTOM ->
-                                        openAIClient.validateKey(trimmedKey, customEndpoint)
-                                    else ->
-                                        geminiClient.validateKey(trimmedKey)
+                            // Auto-detect provider from key prefix so Gemini + Groq keys can be added freely
+                            val detected = KeyManager.detectProviderType(trimmedKey)
+                            val activeProvider = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, null))
+                            val customEndpoint = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
+                            val result = when {
+                                detected == ProviderType.GEMINI -> geminiClient.validateKey(trimmedKey)
+                                detected == ProviderType.GROQ -> openAIClient.validateKey(trimmedKey, GroqConfig.ENDPOINT)
+                                activeProvider == ProviderType.CUSTOM && customEndpoint.isBlank() -> {
+                                    isTesting = false
+                                    testResult = customEndpointRequiredMsg
+                                    testSuccess = false
+                                    return@launch
                                 }
+                                activeProvider == ProviderType.BAI -> openAIClient.validateKey(trimmedKey, BaiConfig.ENDPOINT)
+                                activeProvider == ProviderType.CUSTOM -> openAIClient.validateKey(trimmedKey, customEndpoint)
+                                else -> geminiClient.validateKey(trimmedKey)
                             }
                             isTesting = false
                             if (result.isSuccess) {
@@ -166,16 +194,9 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                                 newKey = ""
                                 testResult = validAddedMsg
                                 testSuccess = true
-                                // Clear clipboard to prevent API key leaking via paste history
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
                             } else {
-                                // redactSecrets: some OpenAI-compatible endpoints echo the
-                                // submitted key back in error.message ("Incorrect API key
-                                // provided: sk-ab...XYZ"). This is the one path that shows a
-                                // raw provider message — the accessibility service maps every
-                                // message onto a localized string instead — so it is the one
-                                // path that has to strip secrets before displaying it.
                                 val raw = result.exceptionOrNull()?.message ?: ""
                                 testResult = when {
                                     raw.contains(ApiClientUtils.SIGNIN_REQUIRED_MARKER) -> signinRequiredMsg
@@ -194,34 +215,34 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                 Text(
                     text = testResult!!,
                     color = if (testSuccess) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
-            val (apiKeyUrl, providerName) = when (prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI) ?: ProviderType.GEMINI) {
-                ProviderType.GROQ -> "https://console.groq.com/keys" to "Groq"
-                ProviderType.BAI -> "https://b.ai" to "B.ai"
-                ProviderType.CUSTOM -> null to null
-                else -> "https://aistudio.google.com/api-keys" to "Gemini"
-            }
-            if (apiKeyUrl != null && providerName != null) {
-                Text(
-                    text = stringResource(R.string.keys_get_api_key, providerName),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .clickable(interactionSource = null, indication = null) {
-                            try {
-                                uriHandler.openUri(apiKeyUrl)
-                            } catch (_: Exception) {
-                            }
-                        }
-                        .padding(top = 8.dp)
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MystTonalButton(
+                    text = "Get Gemini Key",
+                    onClick = { try { uriHandler.openUri("https://aistudio.google.com/api-keys") } catch (_: Exception) {} },
+                    modifier = Modifier.weight(1f)
+                )
+                MystTonalButton(
+                    text = "Get Groq Key",
+                    onClick = { try { uriHandler.openUri("https://console.groq.com/keys") } catch (_: Exception) {} },
+                    modifier = Modifier.weight(1f)
                 )
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Auto-Rotation: Requests split across all Gemini keys. If all fail or hit quota, Mystx switches to your available Groq key automatically.",
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         if (keys.isNotEmpty()) {
             MystCard(modifier = Modifier.weight(1f)) {
@@ -230,15 +251,42 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 4.dp)
                 ) {
-                    itemsIndexed(keys, key = { index, k -> "$index-${k.hashCode()}" }) { index, key ->
+                    itemsIndexed(keys, key = { index, k -> "$index-${k.hashCode()}" }) { _, key ->
+                        val health = keyManager.getKeyHealth(key)
+                        val badgeText = when {
+                            health.isReady -> "Ready"
+                            health.isInvalid -> "Invalid"
+                            else -> "Wait ${health.cooldownSeconds}s"
+                        }
+                        val badgeColor = when {
+                            health.isReady -> MaterialTheme.colorScheme.tertiary
+                            health.isInvalid -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.primary
+                        }
                         MystItemCard {
                             Column(modifier = Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
-                                Text(
-                                    text = "••••••••" + key.takeLast(4),
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "••••" + key.takeLast(4),
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = badgeText,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = badgeColor,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(badgeColor.copy(alpha = 0.14f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                                 Text(
                                     text = getProviderHint(key),
                                     fontSize = 11.sp,
@@ -247,7 +295,7 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                             }
                             Text(
                                 text = stringResource(R.string.delete_confirm_button),
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.clickable(
@@ -298,5 +346,35 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
             },
             onDismissRequest = { keyToDelete = null }
         )
+    }
+}
+
+@Composable
+private fun ProviderAvailabilityCard(
+    label: String,
+    ready: Int,
+    total: Int,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "$ready/$total ready",
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = if (ready > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

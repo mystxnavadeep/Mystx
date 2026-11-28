@@ -42,6 +42,7 @@ import com.mystx.app.manager.AuthManager
 import com.mystx.app.model.PrefKeys
 import com.mystx.app.ui.AppGuideScreen
 import com.mystx.app.ui.AuthScreen
+import com.mystx.app.ui.QuickStartScreen
 import com.mystx.app.ui.billing.AdUnlockActivity
 import com.mystx.app.ui.billing.ProUpgradeScreen
 import com.mystx.app.ui.DashboardScreen
@@ -131,15 +132,35 @@ fun MystxMainScreen(
                 !vm.prefs.getBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false)
         )
     }
+    var showQuickStart by rememberSaveable {
+        mutableStateOf(!vm.prefs.getBoolean(PrefKeys.QUICK_START_COMPLETED, false))
+    }
     if (showAuthScreen && incomingPdfUri == null) {
         AuthScreen(
             onAuthSuccess = {
                 vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, false).apply()
                 showAuthScreen = false
+                if (!vm.prefs.getBoolean(PrefKeys.QUICK_START_COMPLETED, false)) {
+                    showQuickStart = true
+                }
             },
             onContinueAsGuest = {
                 vm.prefs.edit().putBoolean(PrefKeys.AUTH_SKIPPED_GUEST, true).apply()
                 showAuthScreen = false
+                if (!vm.prefs.getBoolean(PrefKeys.QUICK_START_COMPLETED, false)) {
+                    showQuickStart = true
+                }
+            }
+        )
+        return
+    }
+    if (showQuickStart && incomingPdfUri == null) {
+        QuickStartScreen(
+            keyManager = vm.keyManager,
+            prefs = vm.prefs,
+            onComplete = {
+                vm.prefs.edit().putBoolean(PrefKeys.QUICK_START_COMPLETED, true).apply()
+                showQuickStart = false
             }
         )
         return
