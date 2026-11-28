@@ -1,0 +1,2 @@
+- fix(api): use url instead of endpoint in httpGet Sarvam header check
+- feat: add Sarvam AI V2 & OpenCode Zen providers with host-isolated Custom keys
