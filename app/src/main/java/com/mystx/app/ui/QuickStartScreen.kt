@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.foundation.BorderStroke
@@ -85,6 +86,14 @@ fun QuickStartScreen(
 
     var step by remember { mutableIntStateOf(1) }
     var serviceEnabled by remember { mutableStateOf(isMystxAccessibilityActive(context)) }
+    var batteryOk by remember {
+        mutableStateOf(
+            try {
+                (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+                    ?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+            } catch (_: Exception) { true }
+        )
+    }
     var keys by remember { mutableStateOf<List<String>>(emptyList()) }
     var newKey by remember { mutableStateOf("") }
     var isTesting by remember { mutableStateOf(false) }
@@ -97,6 +106,10 @@ fun QuickStartScreen(
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             serviceEnabled = withContext(Dispatchers.IO) { isMystxAccessibilityActive(context) }
+            batteryOk = try {
+                (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+                    ?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+            } catch (_: Exception) { true }
             keys = withContext(Dispatchers.IO) { keyManager.getKeys() }
         }
     }
@@ -240,6 +253,49 @@ fun QuickStartScreen(
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                }
+
+                if (!batteryOk) {
+                    MystCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                                Text(
+                                    text = "Disable Battery Restrictions",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Recommended on Poco / Xiaomi HyperOS so the system doesn't kill Mystx.",
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            MystTonalButton(
+                                text = "Allow",
+                                onClick = {
+                                    try {
+                                        context.startActivity(
+                                            Intent(
+                                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                                Uri.parse("package:${context.packageName}")
+                                            )
+                                        )
+                                    } catch (_: Exception) {
+                                        try {
+                                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
 

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,6 +61,46 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
+
+private fun isBatteryUnrestricted(context: Context): Boolean {
+    return try {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+        pm.isIgnoringBatteryOptimizations(context.packageName)
+    } catch (_: Exception) {
+        true
+    }
+}
+
+private fun openBatteryUnrestrictedSettings(context: Context) {
+    try {
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}")
+        )
+        context.startActivity(intent)
+        return
+    } catch (_: Exception) {
+    }
+    try {
+        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        return
+    } catch (_: Exception) {
+    }
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null)
+            )
+        )
+    } catch (_: Exception) {
+    }
+}
+
+private fun isXiaomiOrPoco(): Boolean {
+    val m = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase(Locale.ROOT)
+    return m.contains("xiaomi") || m.contains("poco") || m.contains("redmi")
+}
 
 private fun checkServiceEnabled(context: Context): Boolean {
     val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
@@ -116,6 +157,7 @@ fun DashboardScreen(
     var isServiceEnabled by remember { mutableStateOf(checkServiceEnabled(context)) }
     var keyCount by remember { mutableIntStateOf(0) }
     var showKilledBanner by remember { mutableStateOf(false) }
+    var batteryUnrestricted by remember { mutableStateOf(isBatteryUnrestricted(context)) }
 
     var monthlyRequests by remember { mutableIntStateOf(statsManager.monthlyRequests) }
     var favoriteCommand by remember { mutableStateOf(statsManager.favoriteCommand) }
@@ -170,6 +212,7 @@ fun DashboardScreen(
             favoriteCommand = statsManager.favoriteCommand
             dailyCounts = statsManager.dailyCounts()
             showKilledBanner = killed
+            batteryUnrestricted = isBatteryUnrestricted(context)
         }
     }
 
@@ -335,6 +378,41 @@ fun DashboardScreen(
                             }
                         )
                     }
+                }
+            }
+        }
+
+        // Battery / HyperOS Keep-Alive Card (auto-hides once unrestricted)
+        if (!batteryUnrestricted) {
+            MystCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = if (isXiaomiOrPoco()) "HyperOS / Poco Keep-Alive" else "Prevent Background Stop",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (isXiaomiOrPoco()) {
+                                "Set Battery to No restrictions so HyperOS doesn't stop Mystx Accessibility."
+                            } else {
+                                "Disable battery restriction so Mystx stays active in the background."
+                            },
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    MystTonalButton(
+                        text = "Allow",
+                        onClick = { openBatteryUnrestrictedSettings(context) }
+                    )
                 }
             }
         }
