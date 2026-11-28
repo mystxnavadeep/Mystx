@@ -1,0 +1,2 @@
+- fix(main): declare selectedTab before advanceTour in MainActivity
+- feat: add InteractiveTourOverlay spotlight walkthrough & per-provider key tagging
