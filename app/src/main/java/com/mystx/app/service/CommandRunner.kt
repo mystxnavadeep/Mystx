@@ -43,6 +43,8 @@ private data class ResolvedProvider(
 
 private val KNOWN_FAILOVER_TYPES = setOf(
     ProviderType.GEMINI,
+    ProviderType.SARVAM,
+    ProviderType.OPENCODE,
     ProviderType.GROQ,
     ProviderType.BAI,
     ProviderType.CUSTOM
@@ -194,7 +196,7 @@ suspend fun runTextCommand(
         // One attempt per configured key; getNextKey skips the ones already tried, plus any that are
         // benched for rate limiting or known-invalid. Keyless local Custom endpoints run once with "".
         val activeProviderType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
-        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType)
+        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType, endpoint)
         val keylessCustom = provider.type == ProviderType.CUSTOM && configuredKeys.isEmpty()
         if (configuredKeys.isEmpty() && !keylessCustom) {
             continue
@@ -206,7 +208,7 @@ suspend fun runTextCommand(
                 if (tried.isNotEmpty()) break
                 ""
             } else {
-                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType) ?: break
+                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType, endpoint) ?: break
             }
             tried.add(key)
             if (!started) {
@@ -357,7 +359,7 @@ suspend fun runTextCommandStream(
         var shouldFailover = true
 
         val activeProviderType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
-        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType)
+        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType, endpoint)
         val keylessCustom = provider.type == ProviderType.CUSTOM && configuredKeys.isEmpty()
         if (configuredKeys.isEmpty() && !keylessCustom) {
             continue
@@ -369,7 +371,7 @@ suspend fun runTextCommandStream(
                 if (tried.isNotEmpty()) break
                 ""
             } else {
-                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType) ?: break
+                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType, endpoint) ?: break
             }
             tried.add(key)
 

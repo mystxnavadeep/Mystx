@@ -7,9 +7,11 @@ import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -38,7 +40,8 @@ import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.PrefKeys
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.BaiConfig
-import com.mystx.app.provider.GroqConfig
+import com.mystx.app.provider.OpenCodeConfig
+import com.mystx.app.provider.SarvamConfig
 import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystDialog
 import com.mystx.app.ui.components.MystEmptyState
@@ -55,15 +58,15 @@ import kotlinx.coroutines.withContext
 fun getProviderHint(key: String): String {
     return when {
         key.startsWith("AIza") -> "Gemini"
-        key.startsWith("gsk_") -> "Groq"
-        key.startsWith("sk-") -> "OpenAI / Custom"
-        else -> "Custom API"
+        key.startsWith("sk-or-") -> "Custom · openrouter.ai"
+        else -> "API Key"
     }
 }
 
 private fun providerDisplayLabel(providerType: String): String = when (providerType) {
     ProviderType.GEMINI -> "Gemini"
-    ProviderType.GROQ -> "Groq"
+    ProviderType.SARVAM -> "Sarvam AI"
+    ProviderType.OPENCODE -> "OpenCode"
     ProviderType.BAI -> "B.ai"
     else -> "Custom"
 }
@@ -74,9 +77,13 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
     val haptic = LocalHapticFeedback.current
     val uriHandler = LocalUriHandler.current
     val activeProvider = remember {
-        ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+        val raw = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+        if (raw == ProviderType.GROQ) ProviderType.SARVAM else raw
     }
     var selectedProvider by remember { mutableStateOf(activeProvider) }
+    var customEndpointInput by remember {
+        mutableStateOf((prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim())
+    }
     var keys by remember { mutableStateOf<List<String>>(emptyList()) }
     var keyToDelete by remember { mutableStateOf<String?>(null) }
     var newKey by remember { mutableStateOf("") }
@@ -91,7 +98,6 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
         keys = withContext(Dispatchers.IO) { keyManager.getKeys() }
     }
 
-    val validAddedMsg = stringResource(R.string.keys_valid_added)
     val alreadyAddedMsg = stringResource(R.string.keys_already_added)
     val validationFailedMsg = stringResource(R.string.keys_validation_failed)
     val keystoreErrorMsg = stringResource(R.string.keys_keystore_error)
@@ -101,12 +107,11 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
 
     val geminiKeys = keys.filter { keyManager.getProviderForKey(it, activeProvider) == ProviderType.GEMINI }
     val geminiReady = geminiKeys.count { keyManager.getKeyHealth(it).isReady }
-    val groqKeys = keys.filter { keyManager.getProviderForKey(it, activeProvider) == ProviderType.GROQ }
-    val groqReady = groqKeys.count { keyManager.getKeyHealth(it).isReady }
-    val customKeys = keys.filter {
-        val p = keyManager.getProviderForKey(it, activeProvider)
-        p != ProviderType.GEMINI && p != ProviderType.GROQ
-    }
+    val sarvamKeys = keys.filter { keyManager.getProviderForKey(it, activeProvider) == ProviderType.SARVAM }
+    val sarvamReady = sarvamKeys.count { keyManager.getKeyHealth(it).isReady }
+    val opencodeKeys = keys.filter { keyManager.getProviderForKey(it, activeProvider) == ProviderType.OPENCODE }
+    val opencodeReady = opencodeKeys.count { keyManager.getKeyHealth(it).isReady }
+    val customKeys = keys.filter { keyManager.getProviderForKey(it, activeProvider) == ProviderType.CUSTOM }
     val customReady = customKeys.count { keyManager.getKeyHealth(it).isReady }
 
     Column(
@@ -129,38 +134,22 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
             }
         }
 
-        // Provider Availability Summary
+        // Provider Availability Summary (horizontal scrollable strip)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            ProviderAvailabilityCard(
-                label = "Gemini",
-                ready = geminiReady,
-                total = geminiKeys.size,
-                isActive = activeProvider == ProviderType.GEMINI,
-                modifier = Modifier.weight(1f)
-            )
-            ProviderAvailabilityCard(
-                label = "Groq",
-                ready = groqReady,
-                total = groqKeys.size,
-                isActive = activeProvider == ProviderType.GROQ,
-                modifier = Modifier.weight(1f)
-            )
-            if (customKeys.isNotEmpty() || activeProvider == ProviderType.CUSTOM || activeProvider == ProviderType.BAI) {
-                ProviderAvailabilityCard(
-                    label = if (activeProvider == ProviderType.BAI) "B.ai" else "Custom",
-                    ready = customReady,
-                    total = customKeys.size,
-                    isActive = activeProvider == ProviderType.CUSTOM || activeProvider == ProviderType.BAI,
-                    modifier = Modifier.weight(1f)
-                )
+            ProviderAvailabilityCard("Gemini", geminiReady, geminiKeys.size, activeProvider == ProviderType.GEMINI)
+            ProviderAvailabilityCard("Sarvam AI", sarvamReady, sarvamKeys.size, activeProvider == ProviderType.SARVAM)
+            ProviderAvailabilityCard("OpenCode", opencodeReady, opencodeKeys.size, activeProvider == ProviderType.OPENCODE)
+            if (customKeys.isNotEmpty() || activeProvider == ProviderType.CUSTOM) {
+                ProviderAvailabilityCard("Custom", customReady, customKeys.size, activeProvider == ProviderType.CUSTOM)
             }
         }
 
         MystCard {
-            // Explicit Provider Selector so every key is tagged accurately (even non-AIza Gemini keys)
             Text(
                 text = "Key Provider",
                 fontSize = 12.sp,
@@ -174,7 +163,8 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
             ) {
                 val options = listOf(
                     ProviderType.GEMINI to "Gemini",
-                    ProviderType.GROQ to "Groq",
+                    ProviderType.SARVAM to "Sarvam",
+                    ProviderType.OPENCODE to "OpenCode",
                     ProviderType.CUSTOM to "Custom"
                 )
                 options.forEach { (type, label) ->
@@ -200,12 +190,35 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                     }
+                }
+            }
+
+            if (selectedProvider == ProviderType.CUSTOM) {
+                Spacer(modifier = Modifier.height(8.dp))
+                MystTextField(
+                    value = customEndpointInput,
+                    onValueChange = {
+                        customEndpointInput = it
+                        prefs.edit().putString(PrefKeys.CUSTOM_ENDPOINT, it.trim()).apply()
+                    },
+                    placeholder = { Text("Custom Base URL (e.g. https://openrouter.ai/api/v1)", fontSize = 12.sp) },
+                    singleLine = true
+                )
+                val hostLabel = KeyManager.extractHostLabel(customEndpointInput)
+                if (hostLabel != null) {
+                    Text(
+                        text = "Key will be isolated for: $hostLabel",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
 
@@ -216,11 +229,8 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                 onValueChange = { input ->
                     if (input.length <= 256) {
                         newKey = input
-                        // Auto-switch only for unambiguous prefixes
-                        KeyManager.detectKnownPrefixProvider(input)?.let { detected ->
-                            if (detected == ProviderType.GEMINI || detected == ProviderType.GROQ) {
-                                selectedProvider = detected
-                            }
+                        if (input.trim().startsWith("AIza")) {
+                            selectedProvider = ProviderType.GEMINI
                         }
                     }
                 },
@@ -239,10 +249,11 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                         scope.launch {
                             val trimmedKey = newKey.trim()
                             val targetProvider = selectedProvider
+                            val ep = customEndpointInput.trim()
                             if (withContext(Dispatchers.IO) { keyManager.getKeys() }.contains(trimmedKey)) {
                                 isTesting = false
                                 withContext(Dispatchers.IO) {
-                                    keyManager.addKey(trimmedKey, targetProvider)
+                                    keyManager.addKey(trimmedKey, targetProvider, ep)
                                     keyManager.clearMarks(trimmedKey)
                                 }
                                 keys = withContext(Dispatchers.IO) { keyManager.getKeys() }
@@ -250,32 +261,33 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                                 testSuccess = false
                                 return@launch
                             }
-                            val customEndpoint = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
                             val result = when (targetProvider) {
                                 ProviderType.GEMINI -> geminiClient.validateKey(trimmedKey)
-                                ProviderType.GROQ -> openAIClient.validateKey(trimmedKey, GroqConfig.ENDPOINT)
+                                ProviderType.SARVAM -> openAIClient.validateKey(trimmedKey, SarvamConfig.ENDPOINT)
+                                ProviderType.OPENCODE -> openAIClient.validateKey(trimmedKey, OpenCodeConfig.ENDPOINT)
                                 ProviderType.BAI -> openAIClient.validateKey(trimmedKey, BaiConfig.ENDPOINT)
                                 ProviderType.CUSTOM -> {
-                                    if (customEndpoint.isBlank()) {
+                                    if (ep.isBlank()) {
                                         isTesting = false
                                         testResult = customEndpointRequiredMsg
                                         testSuccess = false
                                         return@launch
                                     }
-                                    openAIClient.validateKey(trimmedKey, customEndpoint)
+                                    openAIClient.validateKey(trimmedKey, ep)
                                 }
                                 else -> geminiClient.validateKey(trimmedKey)
                             }
                             isTesting = false
                             if (result.isSuccess) {
-                                if (!withContext(Dispatchers.IO) { keyManager.addKey(trimmedKey, targetProvider) }) {
+                                if (!withContext(Dispatchers.IO) { keyManager.addKey(trimmedKey, targetProvider, ep) }) {
                                     testResult = keystoreErrorMsg
                                     testSuccess = false
                                     return@launch
                                 }
                                 keys = withContext(Dispatchers.IO) { keyManager.getKeys() }
                                 newKey = ""
-                                testResult = "${providerDisplayLabel(targetProvider)} key added!"
+                                val host = if (targetProvider == ProviderType.CUSTOM) KeyManager.extractHostLabel(ep) else null
+                                testResult = if (host != null) "Custom ($host) key added!" else "${providerDisplayLabel(targetProvider)} key added!"
                                 testSuccess = true
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
@@ -305,26 +317,24 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
             Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 MystTonalButton(
-                    text = "Get Gemini Key",
+                    text = "Gemini",
                     onClick = { try { uriHandler.openUri("https://aistudio.google.com/api-keys") } catch (_: Exception) {} },
                     modifier = Modifier.weight(1f)
                 )
                 MystTonalButton(
-                    text = "Get Groq Key",
-                    onClick = { try { uriHandler.openUri("https://console.groq.com/keys") } catch (_: Exception) {} },
+                    text = "Sarvam",
+                    onClick = { try { uriHandler.openUri("https://dashboard.sarvam.ai") } catch (_: Exception) {} },
+                    modifier = Modifier.weight(1f)
+                )
+                MystTonalButton(
+                    text = "OpenCode",
+                    onClick = { try { uriHandler.openUri("https://opencode.ai/zen") } catch (_: Exception) {} },
                     modifier = Modifier.weight(1f)
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Requests route through your active provider's keys (${providerDisplayLabel(activeProvider)}) with round-robin balancing, and auto-failover if all keys hit limits.",
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
 
         if (keys.isNotEmpty()) {
@@ -335,7 +345,7 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                     contentPadding = PaddingValues(bottom = 4.dp)
                 ) {
                     itemsIndexed(keys, key = { index, k -> "$index-${k.hashCode()}" }) { _, key ->
-                        val keyProvider = keyManager.getProviderForKey(key, activeProvider)
+                        val displayLabel = keyManager.getKeyDisplayLabel(key, activeProvider)
                         val health = keyManager.getKeyHealth(key)
                         val badgeText = when {
                             health.isReady -> "Ready"
@@ -372,7 +382,7 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                                     )
                                 }
                                 Text(
-                                    text = providerDisplayLabel(keyProvider),
+                                    text = displayLabel,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.primary
@@ -439,11 +449,9 @@ private fun ProviderAvailabilityCard(
     label: String,
     ready: Int,
     total: Int,
-    isActive: Boolean = false,
-    modifier: Modifier = Modifier
+    isActive: Boolean = false
 ) {
     Surface(
-        modifier = modifier,
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
@@ -452,7 +460,7 @@ private fun ProviderAvailabilityCard(
             else MaterialTheme.colorScheme.outline
         )
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
                 text = if (isActive) "$label · Active" else label,
                 fontSize = 11.sp,
@@ -461,7 +469,7 @@ private fun ProviderAvailabilityCard(
             )
             Text(
                 text = "$ready/$total ready",
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 color = if (ready > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant

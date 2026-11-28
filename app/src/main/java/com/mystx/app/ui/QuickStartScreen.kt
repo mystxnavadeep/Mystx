@@ -48,7 +48,8 @@ import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.PrefKeys
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.BaiConfig
-import com.mystx.app.provider.GroqConfig
+import com.mystx.app.provider.OpenCodeConfig
+import com.mystx.app.provider.SarvamConfig
 import com.mystx.app.ui.components.MystAuroraBackdrop
 import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystDivider
@@ -116,8 +117,8 @@ fun QuickStartScreen(
 
     val activeProv = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
     val geminiCount = keys.count { keyManager.getProviderForKey(it, activeProv) == ProviderType.GEMINI }
-    val groqCount = keys.count { keyManager.getProviderForKey(it, activeProv) == ProviderType.GROQ }
-    val otherCount = keys.size - geminiCount - groqCount
+    val sarvamCount = keys.count { keyManager.getProviderForKey(it, activeProv) == ProviderType.SARVAM }
+    val otherCount = keys.size - geminiCount - sarvamCount
 
     Box(modifier = Modifier.fillMaxSize()) {
         MystAuroraBackdrop()
@@ -317,7 +318,7 @@ fun QuickStartScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Add multiple Gemini keys to split requests automatically, plus a Groq key as instant backup if Gemini hits rate limits.",
+                        text = "Add multiple Gemini keys to split requests automatically, plus a Sarvam AI or OpenCode key as instant backup if Gemini hits rate limits.",
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -330,7 +331,7 @@ fun QuickStartScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         ProviderCountPill("Gemini", geminiCount, Modifier.weight(1f))
-                        ProviderCountPill("Groq", groqCount, Modifier.weight(1f))
+                        ProviderCountPill("Sarvam AI", sarvamCount, Modifier.weight(1f))
                         if (otherCount > 0) {
                             ProviderCountPill("Custom", otherCount, Modifier.weight(1f))
                         }
@@ -341,7 +342,7 @@ fun QuickStartScreen(
                     MystTextField(
                         value = newKey,
                         onValueChange = { if (it.length <= 256) newKey = it },
-                        placeholder = { Text("Paste Gemini (AIza...) or Groq (gsk_...) key", fontSize = 13.sp) },
+                        placeholder = { Text("Paste Gemini, Sarvam AI, or OpenCode key", fontSize = 13.sp) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation()
                     )
@@ -371,7 +372,8 @@ fun QuickStartScreen(
                                 val customEp = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
                                 val result = when (detected) {
                                     ProviderType.GEMINI -> geminiClient.validateKey(trimmed)
-                                    ProviderType.GROQ -> openAIClient.validateKey(trimmed, GroqConfig.ENDPOINT)
+                                    ProviderType.SARVAM -> openAIClient.validateKey(trimmed, SarvamConfig.ENDPOINT)
+                                    ProviderType.OPENCODE -> openAIClient.validateKey(trimmed, OpenCodeConfig.ENDPOINT)
                                     else -> {
                                         val activeProv = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, null))
                                         when {
@@ -392,7 +394,8 @@ fun QuickStartScreen(
                                         statusIsError = false
                                         val label = when (detected) {
                                             ProviderType.GEMINI -> "Gemini"
-                                            ProviderType.GROQ -> "Groq"
+                                            ProviderType.SARVAM -> "Sarvam AI"
+                                            ProviderType.OPENCODE -> "OpenCode"
                                             else -> "Custom"
                                         }
                                         statusMessage = "$label key added! Add another key for rotation/failover or tap Finish."
@@ -442,9 +445,9 @@ fun QuickStartScreen(
                             modifier = Modifier.weight(1f)
                         )
                         MystTonalButton(
-                            text = "Get Groq Key",
+                            text = "Get Sarvam Key",
                             onClick = {
-                                try { uriHandler.openUri("https://console.groq.com/keys") } catch (_: Exception) {}
+                                try { uriHandler.openUri("https://dashboard.sarvam.ai") } catch (_: Exception) {}
                             },
                             modifier = Modifier.weight(1f)
                         )

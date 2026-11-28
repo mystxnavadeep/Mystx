@@ -38,12 +38,16 @@ import com.mystx.app.manager.KeyManager
 import com.mystx.app.model.BaiModels
 import com.mystx.app.model.GeminiModels
 import com.mystx.app.model.GroqModels
+import com.mystx.app.model.OpenCodeModels
+import com.mystx.app.model.SarvamModels
 import com.mystx.app.model.PrefKeys
 import com.mystx.app.model.ProviderType
 import com.mystx.app.provider.BaiConfig
 import com.mystx.app.provider.EndpointValidator
 import com.mystx.app.provider.GeminiConfig
 import com.mystx.app.provider.GroqConfig
+import com.mystx.app.provider.OpenCodeConfig
+import com.mystx.app.provider.SarvamConfig
 import com.mystx.app.service.discovery.ModelDiscoveryService
 import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystDialog
@@ -85,6 +89,8 @@ fun SettingsScreen(
     var providerExpanded by remember { mutableStateOf(false) }
 
     var selectedModel by remember { mutableStateOf(GeminiConfig.sanitizeModel(prefs.getString(PrefKeys.GEMINI_MODEL, GeminiModels.DEFAULT))) }
+    var sarvamModel by remember { mutableStateOf(SarvamConfig.sanitizeModel(prefs.getString(PrefKeys.SARVAM_MODEL, SarvamModels.DEFAULT))) }
+    var opencodeModel by remember { mutableStateOf(OpenCodeConfig.sanitizeModel(prefs.getString(PrefKeys.OPENCODE_MODEL, OpenCodeModels.DEFAULT))) }
     var groqModel by remember { mutableStateOf(GroqConfig.sanitizeModel(prefs.getString(PrefKeys.GROQ_MODEL, GroqModels.DEFAULT))) }
     var baiModel by remember { mutableStateOf(BaiConfig.sanitizeModel(prefs.getString(PrefKeys.BAI_MODEL, BaiModels.DEFAULT))) }
 
@@ -475,7 +481,8 @@ fun SettingsScreen(
                 MystTextField(
                     value = when (providerType) {
                         ProviderType.GEMINI -> stringResource(R.string.settings_provider_gemini)
-                        ProviderType.GROQ -> stringResource(R.string.settings_provider_groq)
+                        ProviderType.SARVAM, ProviderType.GROQ -> stringResource(R.string.settings_provider_sarvam)
+                        ProviderType.OPENCODE -> stringResource(R.string.settings_provider_opencode)
                         ProviderType.BAI -> stringResource(R.string.settings_provider_bai)
                         else -> stringResource(R.string.settings_provider_custom)
                     },
@@ -498,12 +505,22 @@ fun SettingsScreen(
                         }
                     )
                     MystDropdownMenuItem(
-                        text = stringResource(R.string.settings_provider_groq),
-                        isSelected = providerType == ProviderType.GROQ,
+                        text = stringResource(R.string.settings_provider_sarvam),
+                        isSelected = providerType == ProviderType.SARVAM || providerType == ProviderType.GROQ,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            providerType = ProviderType.GROQ
-                            prefs.edit().putString(PrefKeys.PROVIDER_TYPE, ProviderType.GROQ).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                            providerType = ProviderType.SARVAM
+                            prefs.edit().putString(PrefKeys.PROVIDER_TYPE, ProviderType.SARVAM).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                            providerExpanded = false
+                        }
+                    )
+                    MystDropdownMenuItem(
+                        text = stringResource(R.string.settings_provider_opencode),
+                        isSelected = providerType == ProviderType.OPENCODE,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            providerType = ProviderType.OPENCODE
+                            prefs.edit().putString(PrefKeys.PROVIDER_TYPE, ProviderType.OPENCODE).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
                             providerExpanded = false
                         }
                     )
@@ -637,6 +654,8 @@ fun SettingsScreen(
             } else {
                 val currentDisplayValue = when (providerType) {
                     ProviderType.GEMINI -> ModelDiscoveryService.getModelLabel(selectedModel, ProviderType.GEMINI, prefs)
+                    ProviderType.SARVAM -> ModelDiscoveryService.getModelLabel(sarvamModel, ProviderType.SARVAM, prefs)
+                    ProviderType.OPENCODE -> ModelDiscoveryService.getModelLabel(opencodeModel, ProviderType.OPENCODE, prefs)
                     ProviderType.GROQ -> ModelDiscoveryService.getModelLabel(groqModel, ProviderType.GROQ, prefs)
                     ProviderType.BAI -> ModelDiscoveryService.getModelLabel(baiModel, ProviderType.BAI, prefs)
                     else -> ""
@@ -663,6 +682,8 @@ fun SettingsScreen(
                         currentModels.forEach { item ->
                             val isSelected = when (providerType) {
                                 ProviderType.GEMINI -> selectedModel == item.id
+                                ProviderType.SARVAM -> sarvamModel == item.id
+                                ProviderType.OPENCODE -> opencodeModel == item.id
                                 ProviderType.GROQ -> groqModel == item.id
                                 ProviderType.BAI -> baiModel == item.id
                                 else -> false
@@ -676,6 +697,14 @@ fun SettingsScreen(
                                         ProviderType.GEMINI -> {
                                             selectedModel = item.id
                                             prefs.edit().putString(PrefKeys.GEMINI_MODEL, item.id).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                                        }
+                                        ProviderType.SARVAM -> {
+                                            sarvamModel = item.id
+                                            prefs.edit().putString(PrefKeys.SARVAM_MODEL, item.id).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                                        }
+                                        ProviderType.OPENCODE -> {
+                                            opencodeModel = item.id
+                                            prefs.edit().putString(PrefKeys.OPENCODE_MODEL, item.id).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
                                         }
                                         ProviderType.GROQ -> {
                                             groqModel = item.id
@@ -702,7 +731,7 @@ fun SettingsScreen(
                 MystGradientButton(
                     text = if (isFetchingModels) fetchingModelsMsg else fetchModelsMsg,
                     onClick = {
-                        val activeKey = apiKeys.firstOrNull()
+                        val activeKey = keyManager.getKeysForProvider(providerType, providerType, customEndpoint).firstOrNull()
                         if (providerType != ProviderType.CUSTOM && activeKey.isNullOrBlank()) {
                             fetchMessage = noApiKeyMsg
                             fetchSuccess = false
@@ -734,6 +763,20 @@ fun SettingsScreen(
                                                 val newModel = models.firstOrNull { it.id == GeminiModels.DEFAULT }?.id ?: models.first().id
                                                 selectedModel = newModel
                                                 prefs.edit().putString(PrefKeys.GEMINI_MODEL, newModel).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                                            }
+                                        }
+                                        ProviderType.SARVAM -> {
+                                            if (sarvamModel.isBlank() || models.none { it.id == sarvamModel }) {
+                                                val newModel = models.firstOrNull { it.id == SarvamModels.DEFAULT }?.id ?: models.first().id
+                                                sarvamModel = newModel
+                                                prefs.edit().putString(PrefKeys.SARVAM_MODEL, newModel).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
+                                            }
+                                        }
+                                        ProviderType.OPENCODE -> {
+                                            if (opencodeModel.isBlank() || models.none { it.id == opencodeModel }) {
+                                                val newModel = models.firstOrNull { it.id == OpenCodeModels.DEFAULT }?.id ?: models.first().id
+                                                opencodeModel = newModel
+                                                prefs.edit().putString(PrefKeys.OPENCODE_MODEL, newModel).remove(PrefKeys.STRUCTURED_OUTPUT_DISABLED_AT).apply()
                                             }
                                         }
                                         ProviderType.GROQ -> {

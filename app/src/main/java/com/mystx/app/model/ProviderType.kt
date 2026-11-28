@@ -2,10 +2,12 @@ package com.mystx.app.model
 
 object ProviderType {
     const val GEMINI = "gemini"
+    const val SARVAM = "sarvam"
+    const val OPENCODE = "opencode"
     const val GROQ = "groq"
     const val BAI = "bai"
     const val CUSTOM = "custom"
 
-    private val VALID = setOf(GEMINI, GROQ, BAI, CUSTOM)
+    private val VALID = setOf(GEMINI, SARVAM, OPENCODE, GROQ, BAI, CUSTOM)
     fun sanitize(value: String?): String = if (value in VALID) value!! else GEMINI
 }

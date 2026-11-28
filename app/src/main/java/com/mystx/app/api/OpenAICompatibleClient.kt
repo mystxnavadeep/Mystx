@@ -55,6 +55,7 @@ class OpenAICompatibleClient {
             connection.requestMethod = "GET"
             if (cleanKey.isNotBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+                if (endpoint.contains("sarvam.ai", ignoreCase = true)) connection.setRequestProperty("api-subscription-key", cleanKey)
             }
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000
@@ -240,6 +241,7 @@ class OpenAICompatibleClient {
             connection.requestMethod = "GET"
             if (cleanKey.isNotBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+                if (endpoint.contains("sarvam.ai", ignoreCase = true)) connection.setRequestProperty("api-subscription-key", cleanKey)
             }
             connection.connectTimeout = 15_000
             connection.readTimeout = 15_000
@@ -308,6 +310,7 @@ class OpenAICompatibleClient {
             connection.setRequestProperty("Accept", "text/event-stream")
             if (cleanKey.isNotBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+                if (endpoint.contains("sarvam.ai", ignoreCase = true)) connection.setRequestProperty("api-subscription-key", cleanKey)
             }
             connection.doOutput = true
             connection.connectTimeout = 30_000
@@ -563,6 +566,7 @@ class OpenAICompatibleClient {
             connection.setRequestProperty("Content-Type", "application/json")
             if (cleanKey.isNotBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $cleanKey")
+                if (endpoint.contains("sarvam.ai", ignoreCase = true)) connection.setRequestProperty("api-subscription-key", cleanKey)
             }
             connection.doOutput = true
             connection.connectTimeout = 30_000

@@ -3,6 +3,8 @@ package com.mystx.app.model
 object PrefKeys {
     const val PROVIDER_TYPE = "provider_type"
     const val GEMINI_MODEL = "model"
+    const val SARVAM_MODEL = "sarvam_model"
+    const val OPENCODE_MODEL = "opencode_model"
     const val GROQ_MODEL = "groq_model"
     const val BAI_MODEL = "bai_model"
     const val CUSTOM_MODEL = "custom_model"
@@ -12,7 +14,7 @@ object PrefKeys {
     const val EXPLAIN_LANGUAGE = "explain_language"
     const val FAILOVER_ENABLED = "failover_enabled"
     const val FAILOVER_ORDER = "failover_order"
-    const val DEFAULT_FAILOVER_ORDER = "gemini,groq,custom"
+    const val DEFAULT_FAILOVER_ORDER = "gemini,sarvam,opencode,custom"
     const val APP_UI_STYLE = "app_ui_style"
     const val DEFAULT_UI_STYLE = "liquid_glass"
     const val AUTH_SKIPPED_GUEST = "auth_skipped_guest"

@@ -52,7 +52,9 @@
     <string name="settings_title">Settings</string>
     <string name="settings_provider_title">Model Provider</string>
     <string name="settings_provider_gemini">Google Gemini</string>
-    <string name="settings_provider_groq">Groq</string>
+    <string name="settings_provider_groq">Sarvam AI</string>
+    <string name="settings_provider_sarvam">Sarvam AI</string>
+    <string name="settings_provider_opencode">OpenCode</string>
     <string name="settings_provider_bai">B.ai</string>
     <string name="settings_provider_custom">Custom (OpenAI Compatible)</string>
     <string name="settings_model_title">Model</string>

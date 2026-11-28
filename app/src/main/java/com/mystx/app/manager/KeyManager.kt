@@ -6,6 +6,8 @@ import android.util.Log
 import com.mystx.app.model.ProviderType
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URI
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -33,23 +35,57 @@ class KeyManager internal constructor(
 
         internal fun isLegacyPlaintext(stored: String): Boolean = stored.trimStart().startsWith("[")
 
-        /**
-         * Best-effort prefix detection for well-known key formats.
-         * Returns null when ambiguous (e.g., newer Google AI Studio keys that don't start with AIza),
-         * so callers fall back to the explicitly stored or active provider instead of mislabeling as Custom.
-         */
+        /** Extracts clean lowercase host from a custom base URL (e.g. "https://openrouter.ai/api/v1" -> "openrouter.ai"). */
+        fun extractHostLabel(endpoint: String?): String? {
+            val raw = endpoint?.trim().orEmpty()
+            if (raw.isBlank()) return null
+            return try {
+                val host = URI(raw).host?.lowercase(Locale.ROOT)?.removePrefix("www.")
+                host?.takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /** Builds a host-scoped tag for Custom endpoints (e.g. "custom:openrouter.ai"). */
+        fun buildProviderTag(providerType: String, customEndpoint: String = ""): String {
+            val base = ProviderType.sanitize(providerType)
+            if (base == ProviderType.CUSTOM) {
+                val host = extractHostLabel(customEndpoint)
+                if (!host.isNullOrBlank()) return "${ProviderType.CUSTOM}:$host"
+            }
+            return base
+        }
+
+        fun baseProviderFromTag(tag: String): String {
+            val clean = tag.trim().lowercase(Locale.ROOT)
+            return if (clean.startsWith("${ProviderType.CUSTOM}:")) {
+                ProviderType.CUSTOM
+            } else {
+                ProviderType.sanitize(clean)
+            }
+        }
+
+        fun customHostFromTag(tag: String): String? {
+            val clean = tag.trim().lowercase(Locale.ROOT)
+            return if (clean.startsWith("${ProviderType.CUSTOM}:")) {
+                clean.removePrefix("${ProviderType.CUSTOM}:").takeIf { it.isNotBlank() }
+            } else null
+        }
+
         fun detectKnownPrefixProvider(key: String): String? {
             val k = key.trim()
             return when {
                 k.startsWith("AIza") -> ProviderType.GEMINI
-                k.startsWith("gsk_") -> ProviderType.GROQ
-                k.startsWith("sk-") -> ProviderType.CUSTOM
+                k.startsWith("sk-or-") -> "${ProviderType.CUSTOM}:openrouter.ai"
                 else -> null
             }
         }
 
-        fun detectProviderType(key: String, fallback: String = ProviderType.GEMINI): String =
-            detectKnownPrefixProvider(key) ?: ProviderType.sanitize(fallback)
+        fun detectProviderType(key: String, fallback: String = ProviderType.GEMINI): String {
+            val detected = detectKnownPrefixProvider(key)
+            return if (detected != null) baseProviderFromTag(detected) else ProviderType.sanitize(fallback)
+        }
     }
 
     private val rateLimitedKeys = ConcurrentHashMap<String, Long>()
@@ -69,7 +105,6 @@ class KeyManager internal constructor(
     private fun JSONArray.toStringList(): List<String> =
         (0 until length()).map { getString(it) }
 
-    /** Fingerprint used as map key for provider tagging without storing raw plaintext keys in prefs. */
     private fun keyTagId(key: String): String {
         val k = key.trim()
         return "${k.hashCode()}_${k.length}_${k.takeLast(4)}"
@@ -83,7 +118,8 @@ class KeyManager internal constructor(
             val it = obj.keys()
             while (it.hasNext()) {
                 val k = it.next()
-                map[k] = ProviderType.sanitize(obj.optString(k, ProviderType.GEMINI))
+                val v = obj.optString(k, ProviderType.GEMINI).trim().lowercase(Locale.ROOT)
+                if (v.isNotBlank()) map[k] = v
             }
             map
         } catch (_: Exception) {
@@ -150,7 +186,7 @@ class KeyManager internal constructor(
     }
 
     @Synchronized
-    fun addKey(key: String, providerType: String? = null): Boolean {
+    fun addKey(key: String, providerType: String? = null, customEndpoint: String = ""): Boolean {
         val trimmedKey = key.trim()
         if (trimmedKey.isBlank() || trimmedKey.length > MAX_KEY_LENGTH) return false
         val stored = prefs.getString(PREF_KEY_ARRAY, null)
@@ -163,11 +199,14 @@ class KeyManager internal constructor(
             keys.add(trimmedKey)
             if (!saveKeys(keys)) return false
         }
-        val resolvedProvider = providerType?.let { ProviderType.sanitize(it) }
-            ?: detectKnownPrefixProvider(trimmedKey)
-        if (resolvedProvider != null) {
+        val resolvedTag = if (providerType != null) {
+            buildProviderTag(providerType, customEndpoint)
+        } else {
+            detectKnownPrefixProvider(trimmedKey)
+        }
+        if (resolvedTag != null) {
             val map = loadProviderMap()
-            map[keyTagId(trimmedKey)] = resolvedProvider
+            map[keyTagId(trimmedKey)] = resolvedTag
             saveProviderMap(map)
         }
         invalidKeys.remove(trimmedKey)
@@ -190,14 +229,9 @@ class KeyManager internal constructor(
         return saved
     }
 
-    /**
-     * Resolves which provider a key belongs to:
-     * 1. Explicit stored provider tag (chosen when the user added the key)
-     * 2. Unambiguous prefix (AIza -> Gemini, gsk_ -> Groq, sk- -> Custom)
-     * 3. Fallback to [defaultProvider] (user's active selected provider) so legacy keys work seamlessly.
-     */
+    /** Returns raw stored tag, e.g. "gemini", "sarvam", "opencode", or "custom:openrouter.ai". */
     @Synchronized
-    fun getProviderForKey(key: String, defaultProvider: String = ProviderType.GEMINI): String {
+    fun getProviderTagForKey(key: String, defaultProvider: String = ProviderType.GEMINI): String {
         val map = loadProviderMap()
         val explicit = map[keyTagId(key)]
         if (explicit != null) return explicit
@@ -205,33 +239,59 @@ class KeyManager internal constructor(
     }
 
     @Synchronized
-    fun getKeysForProvider(
-        providerType: String,
-        defaultProvider: String = ProviderType.GEMINI
-    ): List<String> {
-        val target = ProviderType.sanitize(providerType)
-        val all = getKeys()
-        return all.filter { key ->
-            val p = getProviderForKey(key, defaultProvider)
-            if (target == ProviderType.BAI || target == ProviderType.CUSTOM) {
-                p == target || p == ProviderType.CUSTOM || p == ProviderType.BAI
-            } else {
-                p == target
-            }
+    fun getProviderForKey(key: String, defaultProvider: String = ProviderType.GEMINI): String =
+        baseProviderFromTag(getProviderTagForKey(key, defaultProvider))
+
+    /** Human-readable provider badge, showing exact host for Custom keys (e.g. "Custom · openrouter.ai"). */
+    @Synchronized
+    fun getKeyDisplayLabel(key: String, defaultProvider: String = ProviderType.GEMINI): String {
+        val tag = getProviderTagForKey(key, defaultProvider)
+        val host = customHostFromTag(tag)
+        if (host != null) return "Custom · $host"
+        return when (baseProviderFromTag(tag)) {
+            ProviderType.GEMINI -> "Gemini"
+            ProviderType.SARVAM -> "Sarvam AI"
+            ProviderType.OPENCODE -> "OpenCode"
+            ProviderType.BAI -> "B.ai"
+            ProviderType.GROQ -> "Sarvam AI"
+            else -> "Custom"
         }
     }
 
     /**
-     * Per-provider round-robin load balancer: divides requests evenly across all healthy
-     * keys for [providerType], skipping rate-limited, invalid, and already-tried keys.
+     * Strictly returns keys matching [providerType] — and for Custom endpoints with a host,
+     * isolates keys per host (so OpenRouter never receives a TokenRouter key or vice versa).
      */
+    @Synchronized
+    fun getKeysForProvider(
+        providerType: String,
+        defaultProvider: String = ProviderType.GEMINI,
+        customEndpoint: String = ""
+    ): List<String> {
+        val target = ProviderType.sanitize(providerType)
+        val all = getKeys()
+        if (target == ProviderType.CUSTOM) {
+            val targetHost = extractHostLabel(customEndpoint)
+            if (!targetHost.isNullOrBlank()) {
+                val exactTag = "${ProviderType.CUSTOM}:$targetHost"
+                val exactMatches = all.filter { getProviderTagForKey(it, defaultProvider) == exactTag }
+                if (exactMatches.isNotEmpty()) return exactMatches
+                // Fall back ONLY to legacy untagged "custom" keys — never to a different host's keys!
+                return all.filter { getProviderTagForKey(it, defaultProvider) == ProviderType.CUSTOM }
+            }
+            return all.filter { getProviderForKey(it, defaultProvider) == ProviderType.CUSTOM }
+        }
+        return all.filter { getProviderForKey(it, defaultProvider) == target }
+    }
+
     @Synchronized
     fun getNextKeyForProvider(
         providerType: String,
         alreadyTried: Set<String> = emptySet(),
-        defaultProvider: String = ProviderType.GEMINI
+        defaultProvider: String = ProviderType.GEMINI,
+        customEndpoint: String = ""
     ): String? {
-        val keys = getKeysForProvider(providerType, defaultProvider)
+        val keys = getKeysForProvider(providerType, defaultProvider, customEndpoint)
         if (keys.isEmpty()) return null
 
         val now = System.currentTimeMillis()
@@ -243,7 +303,8 @@ class KeyManager internal constructor(
         }
         if (validKeys.isEmpty()) return null
 
-        val counter = providerRoundRobin.getOrPut(providerType) { AtomicInteger(0) }
+        val bucket = buildProviderTag(providerType, customEndpoint)
+        val counter = providerRoundRobin.getOrPut(bucket) { AtomicInteger(0) }
         val idx = (counter.getAndIncrement() and Int.MAX_VALUE) % validKeys.size
         return validKeys[idx]
     }
@@ -280,8 +341,11 @@ class KeyManager internal constructor(
     }
 
     @Synchronized
-    fun getAvailableKeyCount(providerType: String, defaultProvider: String = ProviderType.GEMINI): Int =
-        getKeysForProvider(providerType, defaultProvider).count { getKeyHealth(it).isReady }
+    fun getAvailableKeyCount(
+        providerType: String,
+        defaultProvider: String = ProviderType.GEMINI,
+        customEndpoint: String = ""
+    ): Int = getKeysForProvider(providerType, defaultProvider, customEndpoint).count { getKeyHealth(it).isReady }
 
     fun reportRateLimit(key: String, retryAfterSeconds: Long = 60) {
         val trimmedKey = key.trim()
