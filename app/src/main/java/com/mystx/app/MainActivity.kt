@@ -50,7 +50,9 @@ import com.mystx.app.ui.KeysScreen
 import com.mystx.app.ui.SettingsScreen
 import com.mystx.app.ui.components.MystAuroraBackdrop
 import com.mystx.app.ui.components.MystDock
+import com.mystx.app.ui.components.InteractiveTourOverlay
 import com.mystx.app.ui.components.MystDockItem
+import com.mystx.app.ui.components.TourStep
 import com.mystx.app.ui.studio.CommandEditorScreen
 import com.mystx.app.ui.studio.CommandStudioScreen
 import com.mystx.app.ui.theme.MystUiStyle
@@ -154,6 +156,78 @@ fun MystxMainScreen(
         )
         return
     }
+    var tourStep by rememberSaveable { mutableIntStateOf(-1) }
+    val tourSteps = remember {
+        listOf(
+            TourStep(
+                title = "1. Enable Mystx Service",
+                description = "Tap this card to turn on Mystx Accessibility so slash commands work inside WhatsApp, Chrome, Notes, or any app.",
+                tapHint = "Tap the highlighted area or Next to continue",
+                spotlightTopDp = 96.dp,
+                spotlightStartDp = 14.dp,
+                spotlightEndDp = 14.dp,
+                spotlightHeightDp = 82.dp,
+                cardAtBottom = true
+            ),
+            TourStep(
+                title = "2. Free 6-Hour Pass or Pro",
+                description = "Watch a short rewarded video to unlock 6 hours of free AI anytime, or upgrade to Pro for ad-free unlimited access.",
+                tapHint = "Tap the highlighted area or Next to continue",
+                spotlightTopDp = 190.dp,
+                spotlightStartDp = 14.dp,
+                spotlightEndDp = 14.dp,
+                spotlightHeightDp = 118.dp,
+                cardAtBottom = true
+            ),
+            TourStep(
+                title = "3. Add Gemini & Groq Keys",
+                description = "Pick Gemini or Groq, paste your key, and tap Add. Multiple Gemini keys auto-split requests and fail over to Groq if rate-limited.",
+                tapHint = "Tap the highlighted area or Next to see how to add commands",
+                spotlightTopDp = 156.dp,
+                spotlightStartDp = 14.dp,
+                spotlightEndDp = 14.dp,
+                spotlightHeightDp = 196.dp,
+                cardAtBottom = true
+            ),
+            TourStep(
+                title = "4. Create Custom Commands",
+                description = "Tap '+ New' in Command Studio to create your own slash triggers like /heng, /reply, or /fix with custom AI prompts.",
+                tapHint = "Tap the highlighted '+ New' button or Next to continue",
+                spotlightTopDp = 38.dp,
+                spotlightStartDp = 210.dp,
+                spotlightEndDp = 14.dp,
+                spotlightHeightDp = 50.dp,
+                cardAtBottom = true
+            ),
+            TourStep(
+                title = "5. You're All Set!",
+                description = "Customize AI models, themes, or failover anytime in Settings. You can replay this tour anytime from Home → Guide.",
+                tapHint = "Tap Got It to start using Mystx",
+                spotlightTopDp = 42.dp,
+                spotlightStartDp = 14.dp,
+                spotlightEndDp = 14.dp,
+                spotlightHeightDp = 64.dp,
+                cardAtBottom = true
+            )
+        )
+    }
+
+    fun advanceTour(nextStep: Int) {
+        if (nextStep >= tourSteps.size) {
+            vm.prefs.edit().putBoolean(PrefKeys.WALKTHROUGH_COMPLETED, true).apply()
+            tourStep = -1
+            selectedTab = Tab.Dashboard
+        } else {
+            tourStep = nextStep
+            selectedTab = when (nextStep) {
+                0, 1 -> Tab.Dashboard
+                2 -> Tab.Keys
+                3 -> Tab.Commands
+                else -> Tab.Settings
+            }
+        }
+    }
+
     if (showQuickStart && incomingPdfUri == null) {
         QuickStartScreen(
             keyManager = vm.keyManager,
@@ -161,6 +235,9 @@ fun MystxMainScreen(
             onComplete = {
                 vm.prefs.edit().putBoolean(PrefKeys.QUICK_START_COMPLETED, true).apply()
                 showQuickStart = false
+                if (!vm.prefs.getBoolean(PrefKeys.WALKTHROUGH_COMPLETED, false)) {
+                    advanceTour(0)
+                }
             }
         )
         return
@@ -265,7 +342,13 @@ fun MystxMainScreen(
                     .imePadding()
             ) {
                 if (showGuideScreen) {
-                    AppGuideScreen(onBack = { showGuideScreen = false })
+                    AppGuideScreen(
+                        onBack = { showGuideScreen = false },
+                        onStartTour = {
+                            showGuideScreen = false
+                            advanceTour(0)
+                        }
+                    )
                 } else if (showProScreen) {
                     ProUpgradeScreen(
                         onBack = { showProScreen = false },
@@ -358,6 +441,16 @@ fun MystxMainScreen(
             }
         }
 
-
+        if (tourStep in tourSteps.indices && !isEditing && pdfUri == null && !showProScreen && !showGuideScreen) {
+            InteractiveTourOverlay(
+                stepIndex = tourStep,
+                steps = tourSteps,
+                onNext = { advanceTour(tourStep + 1) },
+                onSkip = {
+                    vm.prefs.edit().putBoolean(PrefKeys.WALKTHROUGH_COMPLETED, true).apply()
+                    tourStep = -1
+                }
+            )
+        }
     }
 }

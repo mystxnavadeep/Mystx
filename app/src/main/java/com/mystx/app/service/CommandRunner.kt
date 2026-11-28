@@ -193,7 +193,8 @@ suspend fun runTextCommand(
 
         // One attempt per configured key; getNextKey skips the ones already tried, plus any that are
         // benched for rate limiting or known-invalid. Keyless local Custom endpoints run once with "".
-        val configuredKeys = keyManager.getKeysForProvider(provider.type)
+        val activeProviderType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType)
         val keylessCustom = provider.type == ProviderType.CUSTOM && configuredKeys.isEmpty()
         if (configuredKeys.isEmpty() && !keylessCustom) {
             continue
@@ -205,7 +206,7 @@ suspend fun runTextCommand(
                 if (tried.isNotEmpty()) break
                 ""
             } else {
-                keyManager.getNextKeyForProvider(provider.type, tried) ?: break
+                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType) ?: break
             }
             tried.add(key)
             if (!started) {
@@ -355,7 +356,8 @@ suspend fun runTextCommandStream(
         val tried = mutableSetOf<String>()
         var shouldFailover = true
 
-        val configuredKeys = keyManager.getKeysForProvider(provider.type)
+        val activeProviderType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+        val configuredKeys = keyManager.getKeysForProvider(provider.type, activeProviderType)
         val keylessCustom = provider.type == ProviderType.CUSTOM && configuredKeys.isEmpty()
         if (configuredKeys.isEmpty() && !keylessCustom) {
             continue
@@ -367,7 +369,7 @@ suspend fun runTextCommandStream(
                 if (tried.isNotEmpty()) break
                 ""
             } else {
-                keyManager.getNextKeyForProvider(provider.type, tried) ?: break
+                keyManager.getNextKeyForProvider(provider.type, tried, activeProviderType) ?: break
             }
             tried.add(key)
 
@@ -507,11 +509,12 @@ suspend fun runImageCommand(
     var lastFailedKey: String? = null
     val tried = mutableSetOf<String>()
 
-    val configuredKeys = keyManager.getKeysForProvider(ProviderType.GEMINI)
+    val activeProviderType = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+    val configuredKeys = keyManager.getKeysForProvider(ProviderType.GEMINI, activeProviderType)
     val maxAttempts = configuredKeys.size.coerceAtLeast(1)
     while (tried.size < maxAttempts) {
         currentCoroutineContext().ensureActive()
-        val key = keyManager.getNextKeyForProvider(ProviderType.GEMINI, tried) ?: break
+        val key = keyManager.getNextKeyForProvider(ProviderType.GEMINI, tried, activeProviderType) ?: break
         tried.add(key)
 
         val result = try {

@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystDivider
+import com.mystx.app.ui.components.MystGradientButton
 
 /**
  * Clean, distraction-free in-app guide designed with flat Compose hierarchy,
@@ -45,7 +46,8 @@ import com.mystx.app.ui.components.MystDivider
  */
 @Composable
 fun AppGuideScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onStartTour: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -92,6 +94,27 @@ fun AppGuideScreen(
         )
 
         GuideSectionLabel("4 WAYS TO USE MYSTX")
+
+        MystCard {
+            Text(
+                text = "Interactive Quick Guide",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Highlight each button step-by-step — learn how to enable Mystx, add API keys, and create custom slash commands.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            MystGradientButton(
+                text = "Start Interactive Tour",
+                onClick = onStartTour,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         MystCard {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {

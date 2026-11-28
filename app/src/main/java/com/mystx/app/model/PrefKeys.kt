@@ -17,4 +17,5 @@ object PrefKeys {
     const val DEFAULT_UI_STYLE = "liquid_glass"
     const val AUTH_SKIPPED_GUEST = "auth_skipped_guest"
     const val QUICK_START_COMPLETED = "quick_start_completed"
+    const val WALKTHROUGH_COMPLETED = "walkthrough_completed"
 }

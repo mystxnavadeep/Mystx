@@ -101,8 +101,9 @@ fun QuickStartScreen(
         }
     }
 
-    val geminiCount = keys.count { KeyManager.detectProviderType(it) == ProviderType.GEMINI }
-    val groqCount = keys.count { KeyManager.detectProviderType(it) == ProviderType.GROQ }
+    val activeProv = ProviderType.sanitize(prefs.getString(PrefKeys.PROVIDER_TYPE, ProviderType.GEMINI))
+    val geminiCount = keys.count { keyManager.getProviderForKey(it, activeProv) == ProviderType.GEMINI }
+    val groqCount = keys.count { keyManager.getProviderForKey(it, activeProv) == ProviderType.GROQ }
     val otherCount = keys.size - geminiCount - groqCount
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -310,7 +311,7 @@ fun QuickStartScreen(
                                     newKey = ""
                                     return@launch
                                 }
-                                val detected = KeyManager.detectProviderType(trimmed)
+                                val detected = KeyManager.detectProviderType(trimmed, activeProv)
                                 val customEp = (prefs.getString(PrefKeys.CUSTOM_ENDPOINT, "") ?: "").trim()
                                 val result = when (detected) {
                                     ProviderType.GEMINI -> geminiClient.validateKey(trimmed)
@@ -326,7 +327,7 @@ fun QuickStartScreen(
                                 }
                                 isTesting = false
                                 if (result.isSuccess) {
-                                    val saved = withContext(Dispatchers.IO) { keyManager.addKey(trimmed) }
+                                    val saved = withContext(Dispatchers.IO) { keyManager.addKey(trimmed, detected) }
                                     if (saved) {
                                         keys = withContext(Dispatchers.IO) { keyManager.getKeys() }
                                         // Enable automatic failover when user adds backup keys
