@@ -289,8 +289,11 @@ fun KeysScreen(keyManager: KeyManager, prefs: SharedPreferences) {
                                 val host = if (targetProvider == ProviderType.CUSTOM) KeyManager.extractHostLabel(ep) else null
                                 testResult = if (host != null) "Custom ($host) key added!" else "${providerDisplayLabel(targetProvider)} key added!"
                                 testSuccess = true
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                                try {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("", ""))
+                                } catch (_: Exception) {
+                                }
                             } else {
                                 val raw = result.exceptionOrNull()?.message ?: ""
                                 testResult = when {

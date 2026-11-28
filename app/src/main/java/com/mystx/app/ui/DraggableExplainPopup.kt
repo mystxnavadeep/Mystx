@@ -350,7 +350,7 @@ fun DraggableExplainPopup(
                             } else if (result.isNullOrBlank()) {
                                 "Error: API returned an empty response. Try selecting a different text."
                             } else {
-                                result!!
+                                result.orEmpty()
                             },
                             fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onSurface

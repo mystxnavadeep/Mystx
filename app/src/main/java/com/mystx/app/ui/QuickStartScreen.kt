@@ -62,9 +62,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private fun isMystxAccessibilityActive(context: Context): Boolean {
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-    return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)
-        .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
+    return try {
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+        am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)
+            .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
+    } catch (_: Exception) {
+        false
+    }
 }
 
 /**
@@ -450,8 +454,8 @@ fun QuickStartScreen(
                                         }
                                         statusMessage = "$label key added! Add another key for rotation/failover or tap Finish."
                                         try {
-                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            cm.setPrimaryClip(ClipData.newPlainText("", ""))
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            cm?.setPrimaryClip(ClipData.newPlainText("", ""))
                                         } catch (_: Exception) {}
                                     } else {
                                         statusIsError = true

@@ -103,17 +103,21 @@ private fun isXiaomiOrPoco(): Boolean {
 }
 
 private fun checkServiceEnabled(context: Context): Boolean {
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-    val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)
-    return enabledServices.any {
-        it.resolveInfo.serviceInfo.packageName == context.packageName
+    return try {
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+        val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)
+        enabledServices.any {
+            it.resolveInfo.serviceInfo.packageName == context.packageName
+        }
+    } catch (_: Exception) {
+        false
     }
 }
 
 @SuppressLint("SoonBlockedPrivateApi")
 private fun isServiceCrashed(context: Context): Boolean {
     return try {
-        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
         val field = AccessibilityServiceInfo::class.java.getDeclaredField("crashed")
         am.getInstalledAccessibilityServiceList().any {
             try {
@@ -188,12 +192,12 @@ fun DashboardScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(context) {
-        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
         val listener = AccessibilityManager.AccessibilityStateChangeListener {
             isServiceEnabled = checkServiceEnabled(context)
         }
-        am.addAccessibilityStateChangeListener(listener)
-        onDispose { am.removeAccessibilityStateChangeListener(listener) }
+        am?.addAccessibilityStateChangeListener(listener)
+        onDispose { am?.removeAccessibilityStateChangeListener(listener) }
     }
 
     LaunchedEffect(lifecycleOwner) {
