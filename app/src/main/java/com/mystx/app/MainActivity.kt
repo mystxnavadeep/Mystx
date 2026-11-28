@@ -156,6 +156,7 @@ fun MystxMainScreen(
         )
         return
     }
+    var selectedTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
     var tourStep by rememberSaveable { mutableIntStateOf(-1) }
     val tourSteps = remember {
         listOf(
@@ -242,7 +243,6 @@ fun MystxMainScreen(
         )
         return
     }
-    var selectedTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
 
     var studioSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var showProScreen by rememberSaveable { mutableStateOf(false) }
