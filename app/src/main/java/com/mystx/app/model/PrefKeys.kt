@@ -20,4 +20,6 @@ object PrefKeys {
     const val AUTH_SKIPPED_GUEST = "auth_skipped_guest"
     const val QUICK_START_COMPLETED = "quick_start_completed"
     const val WALKTHROUGH_COMPLETED = "walkthrough_completed"
+    const val KEYBOARD_STYLE = "keyboard_style"
+    const val DEFAULT_KEYBOARD_STYLE = "pixel_dark"
 }

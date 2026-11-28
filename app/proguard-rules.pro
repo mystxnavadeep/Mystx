@@ -19,3 +19,5 @@
     public static int d(...);
     public static int i(...);
 }
+
+-keep class com.mystx.app.service.MystxKeyboardService { <init>(); }

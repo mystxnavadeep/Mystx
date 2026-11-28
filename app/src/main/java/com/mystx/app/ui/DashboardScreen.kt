@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -17,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +51,8 @@ import com.mystx.app.manager.AccessGateManager
 import com.mystx.app.manager.CommandManager
 import com.mystx.app.manager.KeyManager
 import com.mystx.app.manager.StatsManager
+import com.mystx.app.model.KeyboardStyle
+import com.mystx.app.model.PrefKeys
 import com.mystx.app.ui.components.MystCard
 import com.mystx.app.ui.components.MystCardShape
 import com.mystx.app.ui.components.MystDialog
@@ -100,6 +104,15 @@ private fun openBatteryUnrestrictedSettings(context: Context) {
 private fun isXiaomiOrPoco(): Boolean {
     val m = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase(Locale.ROOT)
     return m.contains("xiaomi") || m.contains("poco") || m.contains("redmi")
+}
+
+private fun isMystxKeyboardEnabled(context: Context): Boolean {
+    return try {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
+        imm.enabledInputMethodList.any { it.packageName == context.packageName }
+    } catch (_: Exception) {
+        false
+    }
 }
 
 private fun checkServiceEnabled(context: Context): Boolean {
@@ -162,6 +175,13 @@ fun DashboardScreen(
     var keyCount by remember { mutableIntStateOf(0) }
     var showKilledBanner by remember { mutableStateOf(false) }
     var batteryUnrestricted by remember { mutableStateOf(isBatteryUnrestricted(context)) }
+    var isKeyboardEnabled by remember { mutableStateOf(isMystxKeyboardEnabled(context)) }
+    val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    var selectedKbStyle by remember {
+        mutableStateOf(
+            KeyboardStyle.fromKey(settingsPrefs.getString(PrefKeys.KEYBOARD_STYLE, PrefKeys.DEFAULT_KEYBOARD_STYLE))
+        )
+    }
 
     var monthlyRequests by remember { mutableIntStateOf(statsManager.monthlyRequests) }
     var favoriteCommand by remember { mutableStateOf(statsManager.favoriteCommand) }
@@ -217,6 +237,7 @@ fun DashboardScreen(
             dailyCounts = statsManager.dailyCounts()
             showKilledBanner = killed
             batteryUnrestricted = isBatteryUnrestricted(context)
+            isKeyboardEnabled = isMystxKeyboardEnabled(context)
         }
     }
 
@@ -382,6 +403,102 @@ fun DashboardScreen(
                             }
                         )
                     }
+                }
+            }
+        }
+
+        // Mystx AI Keyboard Card (Zero Banking/BHIM/Paytm alerts — keeps user's own keyboard via Auto-Back)
+        MystCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Mystx AI Keyboard",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        MystPill(text = if (isKeyboardEnabled) "ENABLED" else "BANKING SAFE")
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = if (isKeyboardEnabled) {
+                            "Switch via globe icon, tap any command, and Auto-Back returns to your own keyboard."
+                        } else {
+                            "Works with BHIM/Paytm (0 alerts). Keep your own keyboard UI & switch in 1 tap."
+                        },
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            // Selectable OEM Keyboard Skin Picker (Pixel, Samsung One UI, HyperOS, Vivo, Realme)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                KeyboardStyle.entries.forEach { skin ->
+                    val active = selectedKbStyle == skin
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(
+                            1.dp,
+                            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                selectedKbStyle = skin
+                                settingsPrefs.edit().putString(PrefKeys.KEYBOARD_STYLE, skin.key).apply()
+                            }
+                    ) {
+                        Text(
+                            text = skin.label,
+                            fontSize = 11.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MystTonalButton(
+                    text = if (isKeyboardEnabled) "Keyboard Settings" else "Enable Keyboard",
+                    onClick = {
+                        try {
+                            context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                        } catch (_: Exception) {
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                if (isKeyboardEnabled) {
+                    MystGradientButton(
+                        text = "Switch Now",
+                        onClick = {
+                            try {
+                                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                                imm?.showInputMethodPicker()
+                            } catch (_: Exception) {
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }

@@ -1,0 +1,146 @@
+package com.mystx.app.model
+
+/**
+ * Selectable native keyboard skins for [com.mystx.app.service.MystxKeyboardService]
+ * so users can match their familiar phone keyboard (Pixel/Gboard, Samsung One UI,
+ * Xiaomi/Poco HyperOS, Vivo OriginOS, or Realme/OnePlus ColorOS) with zero Accessibility alerts.
+ */
+enum class KeyboardStyle(
+    val key: String,
+    val label: String,
+    val subtitle: String,
+    val boardBg: String,
+    val keyBg: String,
+    val keyPressedBg: String,
+    val specialKeyBg: String,
+    val enterBg: String,
+    val enterFg: String,
+    val keyFg: String,
+    val subFg: String,
+    val chipBg: String,
+    val chipBorder: String,
+    val accentHex: String,
+    val keyRadiusDp: Int,
+    val enterRadiusDp: Int,
+    val showNumberRow: Boolean = false
+) {
+    PIXEL_DARK(
+        key = "pixel_dark",
+        label = "Pixel Dark",
+        subtitle = "Material You dark pills",
+        boardBg = "#1B1D22",
+        keyBg = "#2D3038",
+        keyPressedBg = "#3E434E",
+        specialKeyBg = "#23262E",
+        enterBg = "#A8C7FA",
+        enterFg = "#062E6F",
+        keyFg = "#F1F3F4",
+        subFg = "#9AA0A6",
+        chipBg = "#252830",
+        chipBorder = "#383C47",
+        accentHex = "#A8C7FA",
+        keyRadiusDp = 8,
+        enterRadiusDp = 22,
+        showNumberRow = false
+    ),
+    PIXEL_LIGHT(
+        key = "pixel_light",
+        label = "Pixel Light",
+        subtitle = "Clean Gboard daylight",
+        boardBg = "#ECEFF4",
+        keyBg = "#FFFFFF",
+        keyPressedBg = "#DCE3EE",
+        specialKeyBg = "#D8E0EB",
+        enterBg = "#1A73E8",
+        enterFg = "#FFFFFF",
+        keyFg = "#1F1F1F",
+        subFg = "#5F6368",
+        chipBg = "#FFFFFF",
+        chipBorder = "#CFD8E3",
+        accentHex = "#1A73E8",
+        keyRadiusDp = 8,
+        enterRadiusDp = 22,
+        showNumberRow = false
+    ),
+    SAMSUNG_ONE_UI(
+        key = "samsung_one_ui",
+        label = "Samsung One UI",
+        subtitle = "One UI dark + number row",
+        boardBg = "#121212",
+        keyBg = "#2C2C2E",
+        keyPressedBg = "#3F3F44",
+        specialKeyBg = "#1F1F22",
+        enterBg = "#3E91FF",
+        enterFg = "#FFFFFF",
+        keyFg = "#FAFAFA",
+        subFg = "#A1A1A6",
+        chipBg = "#1E1E21",
+        chipBorder = "#323236",
+        accentHex = "#3E91FF",
+        keyRadiusDp = 7,
+        enterRadiusDp = 7,
+        showNumberRow = true
+    ),
+    HYPER_OS(
+        key = "hyper_os",
+        label = "HyperOS / Poco",
+        subtitle = "Xiaomi matte dark blue",
+        boardBg = "#14161A",
+        keyBg = "#252932",
+        keyPressedBg = "#353B47",
+        specialKeyBg = "#1C1F26",
+        enterBg = "#267BFF",
+        enterFg = "#FFFFFF",
+        keyFg = "#F4F6FA",
+        subFg = "#8E96A4",
+        chipBg = "#1D2129",
+        chipBorder = "#303642",
+        accentHex = "#267BFF",
+        keyRadiusDp = 9,
+        enterRadiusDp = 12,
+        showNumberRow = true
+    ),
+    VIVO_ORIGIN(
+        key = "vivo_origin",
+        label = "Vivo Origin",
+        subtitle = "Light soft-pill keys",
+        boardBg = "#F2F4F8",
+        keyBg = "#FFFFFF",
+        keyPressedBg = "#E1E7F5",
+        specialKeyBg = "#E4E8F0",
+        enterBg = "#415FFF",
+        enterFg = "#FFFFFF",
+        keyFg = "#161924",
+        subFg = "#6B7280",
+        chipBg = "#FFFFFF",
+        chipBorder = "#DCE1EC",
+        accentHex = "#415FFF",
+        keyRadiusDp = 10,
+        enterRadiusDp = 14,
+        showNumberRow = false
+    ),
+    REALME_COLOR_OS(
+        key = "realme_color_os",
+        label = "Realme / OnePlus",
+        subtitle = "Carbon dark & emerald",
+        boardBg = "#0E1014",
+        keyBg = "#20242C",
+        keyPressedBg = "#2E3440",
+        specialKeyBg = "#171A20",
+        enterBg = "#14B8A6",
+        enterFg = "#042F2E",
+        keyFg = "#F8FAFC",
+        subFg = "#94A3B8",
+        chipBg = "#181C23",
+        chipBorder = "#2A303C",
+        accentHex = "#14B8A6",
+        keyRadiusDp = 9,
+        enterRadiusDp = 18,
+        showNumberRow = false
+    );
+
+    companion object {
+        fun fromKey(key: String?): KeyboardStyle =
+            entries.firstOrNull { it.key == key } ?: PIXEL_DARK
+    }
+}

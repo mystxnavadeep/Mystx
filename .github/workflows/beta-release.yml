@@ -1,0 +1,165 @@
+name: Beta APK Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      beta_label:
+        description: "Optional custom beta tag suffix (leave empty to auto-increment, e.g. beta-v2.0.1)"
+        required: false
+        type: string
+  push:
+    branches: [beta]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+
+concurrency:
+  group: beta-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8 -XX:+UseG1GC"
+
+jobs:
+  version:
+    name: Determine Beta Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version_name: ${{ steps.version.outputs.version_name }}
+      version_code: ${{ steps.version.outputs.version_code }}
+    steps:
+      - name: Checkout beta branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Calculate next beta tag
+        id: version
+        shell: bash
+        env:
+          CUSTOM_LABEL: ${{ inputs.beta_label }}
+        run: |
+          BASE_VERSION=$(grep 'val baseVersion' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+
+          # Uses "beta-v*" prefix so master's build.yml (which watches tags: ['v*']) never triggers.
+          if [ -n "$CUSTOM_LABEL" ]; then
+            CLEAN_LABEL=$(echo "$CUSTOM_LABEL" | tr -cd 'a-zA-Z0-9._-')
+            TAG="beta-v${BASE_VERSION}-${CLEAN_LABEL}"
+            VERSION_NAME="${BASE_VERSION}-${CLEAN_LABEL}"
+          else
+            LAST=$(git tag -l "beta-v${BASE_VERSION}.*" | sed "s/beta-v${BASE_VERSION}\.//" | sort -n | tail -1)
+            NEXT=$((${LAST:-0} + 1))
+            TAG="beta-v${BASE_VERSION}.${NEXT}"
+            VERSION_NAME="${BASE_VERSION}-beta.${NEXT}"
+          fi
+
+          VERSION_CODE=$(git rev-list --count HEAD)
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    name: Build & Publish Beta APK
+    needs: [version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout beta branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_CACHE_ENCRYPTION_KEY }}
+          gradle-home-cache-cleanup: true
+
+      - name: Decode signing keystore
+        shell: bash
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/release.keystore"
+          chmod 600 "${RUNNER_TEMP}/release.keystore"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Build Signed Beta APK
+        shell: bash
+        run: |
+          result=1
+          for i in 1 2 3; do
+            ./gradlew assembleRelease --parallel --build-cache --no-daemon --configuration-cache-problems=warn --stacktrace \
+              -PversionCode="$VERSION_CODE" \
+              -PversionName="$VERSION_NAME" && { result=0; break; }
+            echo "::warning::Beta build attempt $i failed, retrying..."
+            sleep 15
+          done
+          exit $result
+        env:
+          VERSION_CODE: ${{ needs.version.outputs.version_code }}
+          VERSION_NAME: ${{ needs.version.outputs.version_name }}
+          KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          UNITY_GAME_ID: ${{ secrets.UNITY_GAME_ID }}
+          UNITY_REWARDED_PLACEMENT: ${{ secrets.UNITY_REWARDED_PLACEMENT }}
+          UNITY_TEST_MODE: ${{ secrets.UNITY_TEST_MODE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Cleanup keystore
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/release.keystore"
+
+      - name: Verify & Rename Beta APK
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::APK not found at $APK_PATH"
+            exit 1
+          fi
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
+          ${BUILD_TOOLS}apksigner verify --print-certs "$APK_PATH"
+          mv "$APK_PATH" "app/build/outputs/apk/release/Mystx-${TAG}.apk"
+
+      - name: Publish Beta Pre-release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Mystx Beta (${{ needs.version.outputs.version_name }})
+          body: |
+            ## Mystx Beta Pre-release (`${{ needs.version.outputs.version_name }}`)
+
+            Built from the `beta` branch without modifying `master` (live release).
+
+            - Includes **Mystx AI Keyboard** (6 selectable OEM skins) alongside optional Accessibility Service
+            - Does **not** overwrite the Latest live release
+          files: |
+            app/build/outputs/apk/release/Mystx-${{ needs.version.outputs.tag }}.apk
+          draft: false
+          prerelease: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
