@@ -1,0 +1,1 @@
+- feat: add HyperOS keep-alive & battery optimization exemption prompt
