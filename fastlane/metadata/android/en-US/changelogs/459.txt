@@ -1,0 +1,1 @@
+- feat: add 2-step QuickStartScreen, per-provider key health & round-robin failover
